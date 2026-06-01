@@ -861,9 +861,10 @@
       bottom: auto;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
-      /* เว้นจากบน ~8% ของพื้นที่ที่เห็นจริง (ไม่ใช่ทั้งจอ) ขั้นต่ำ 40px
-         → ตอนคีย์บอร์ดเปิด พื้นที่แคบลง modal จึงขยับขึ้นเล็กน้อยพอดี ไม่กระโดด */
-      padding-top: max(calc(var(--vv-height, 100dvh) * 0.08), 40px);
+      /* เว้นจากบนแบบคงที่ + เผื่อ safe-area (notch/แถบสถานะ)
+         ใช้ค่าตายตัว ไม่ผูกกับ vv-height เพราะเมื่อคีย์บอร์ดเปิด พื้นที่เล็กลง
+         จะทำให้ระยะเว้นน้อยจน modal ชนขอบบน */
+      padding-top: calc(env(safe-area-inset-top, 0px) + 56px);
       padding-bottom: 16px;
     }
     #inputModal .modal-box { margin: 0 auto; }
