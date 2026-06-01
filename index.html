@@ -6171,10 +6171,10 @@
           <div class="flex justify-between items-center pt-2 mt-2 border-t border-themed">
             <span class="text-[10px] text-muted">${time}</span>
             <div class="flex gap-1">
-              ${canEdit ? `<button onclick="editRecord(${h.id})" class="accent-bg-soft px-2 py-1 rounded-md flex items-center gap-1 text-[10px] font-medium">
+              ${canEdit ? `<button onclick="editRecord('${String(h.id).replace(/'/g, "\\'")}')" class="accent-bg-soft px-2 py-1 rounded-md flex items-center gap-1 text-[10px] font-medium">
                 <i data-lucide="edit-2" class="h-3 w-3"></i> ${t('edit')}
               </button>` : ''}
-              <button onclick="deleteRecord(${h.id})" class="danger-bg-soft px-2 py-1 rounded-md flex items-center gap-1 text-[10px] font-medium">
+              <button onclick="deleteRecord('${String(h.id).replace(/'/g, "\\'")}')" class="danger-bg-soft px-2 py-1 rounded-md flex items-center gap-1 text-[10px] font-medium">
                 <i data-lucide="trash-2" class="h-3 w-3"></i> ${t('delete')}
               </button>
             </div>
