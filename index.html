@@ -6438,17 +6438,27 @@
           ctx.fillStyle = C.text; ctx.font = '700 16px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
           ctx.fillText(fmtB(catTotal), donutCx, donutCy + 7);
           ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-          // legend จัดกึ่งกลางแนวตั้งกับ donut
-          const lx = donutCx + donutR + 32;
+          // legend กระชับข้าง donut — ตัวเลข+% ชิดตามชื่อหมวด (ไม่ยืดไปขอบขวา)
+          const lx = donutCx + donutR + 28;
+          const legendW = 430;                 // ความกว้างโซน legend (กระชับ ไม่เต็มจอ)
+          const nameX = lx + 20;               // ตำแหน่งชื่อหมวด
+          const valRight = lx + legendW;       // ขอบขวาของตัวเลข (อยู่ในโซน ไม่ใช่ขอบรูป)
           let ly = donutCy - (legendItems.length * 28) / 2 + 4;
           legendItems.forEach((c, i) => {
             ctx.textBaseline = 'middle';
-            ctx.fillStyle = PALETTE[i % PALETTE.length]; ctx.beginPath(); ctx.arc(lx + 6, ly + 9, 6, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = C.text; ctx.font = '500 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'left';
             const pct = catTotal > 0 ? Math.round(c.amt / catTotal * 100) : 0;
-            ctx.fillText(clip(ctx, catIcon(c.name) + ' ' + c.name, 220), lx + 20, ly + 9);
+            // จุดสี
+            ctx.fillStyle = PALETTE[i % PALETTE.length]; ctx.beginPath(); ctx.arc(lx + 6, ly + 9, 6, 0, Math.PI * 2); ctx.fill();
+            // ชื่อหมวด (ซ้าย)
+            ctx.fillStyle = C.text; ctx.font = '500 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'left';
+            ctx.fillText(clip(ctx, catIcon(c.name) + ' ' + c.name, 180), nameX, ly + 9);
+            // % (ชิดขวาของโซน)
             ctx.fillStyle = C.soft; ctx.font = '500 13px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'right';
-            ctx.fillText(fmtB(c.amt) + '   ' + pct + '%', W - PAD - 2, ly + 9); ctx.textAlign = 'left';
+            ctx.fillText(pct + '%', valRight, ly + 9);
+            // ยอดเงิน (ก่อนหน้า % เล็กน้อย — ชิดกันเป็นกลุ่มเดียว)
+            ctx.fillStyle = C.text; ctx.font = '600 13px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'right';
+            ctx.fillText(fmtB(c.amt), valRight - 52, ly + 9);
+            ctx.textAlign = 'left';
             ly += 28;
           });
           ctx.textBaseline = 'top';
