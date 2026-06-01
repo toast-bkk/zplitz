@@ -851,19 +851,22 @@
     /* ===== Modal ===== */
     .modal-box { animation: scaleIn 0.28s cubic-bezier(0.16, 1, 0.3, 1); background: var(--surface); color: var(--text); }
     /* inputModal: ยึดความสูงตาม visual viewport (พื้นที่ที่เห็นจริงเหนือคีย์บอร์ด)
-       เพื่อจัดกึ่งกลาง + กันปุ่มหลุดใต้คีย์บอร์ด/แถบเมนูล่าง */
+       จัดชิดด้านบน (ไม่กึ่งกลาง) เพื่อให้ modal "นิ่ง" ไม่กระโดดขึ้นเยอะเวลาคีย์บอร์ดเด้ง
+       — กึ่งกลางในพื้นที่ที่เล็กลงจะทำให้ modal ลอยสูงเกินไป */
     #inputModal {
-      align-items: center;
+      align-items: flex-start;
       z-index: 90; /* สูงกว่า onboarding (80) เพื่อให้สร้างทริปจากออนบอร์ดดิ้งได้ */
       height: var(--vv-height, 100dvh);
       top: var(--vv-top, 0px);
       bottom: auto;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
-      padding-top: 16px;
+      /* เว้นจากบน ~8% ของพื้นที่ที่เห็นจริง (ไม่ใช่ทั้งจอ) ขั้นต่ำ 40px
+         → ตอนคีย์บอร์ดเปิด พื้นที่แคบลง modal จึงขยับขึ้นเล็กน้อยพอดี ไม่กระโดด */
+      padding-top: max(calc(var(--vv-height, 100dvh) * 0.08), 40px);
       padding-bottom: 16px;
     }
-    #inputModal .modal-box { margin: auto 0; }
+    #inputModal .modal-box { margin: 0 auto; }
     #actionSheet .modal-box { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
     .modal-overlay { background: color-mix(in srgb, #000 50%, transparent); backdrop-filter: blur(4px); }
     html.dark .modal-overlay { background: color-mix(in srgb, #000 65%, transparent); }
