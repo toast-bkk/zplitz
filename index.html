@@ -80,6 +80,10 @@
         if (vv) {
           root.style.setProperty('--vv-height', vv.height + 'px');
           root.style.setProperty('--vv-top', vv.offsetTop + 'px');
+          // ตรวจว่าคีย์บอร์ดเปิดอยู่ไหม — ถ้าพื้นที่ที่เห็นหดจากความสูงจอเต็มเกิน 120px
+          // ถือว่าคีย์บอร์ด (หรือ toolbar) เด้งขึ้น → ใช้สลับการจัดวาง modal
+          var keyboardOpen = (window.innerHeight - vv.height) > 120;
+          document.body.classList.toggle('keyboard-open', keyboardOpen);
         } else {
           root.style.setProperty('--vv-height', window.innerHeight + 'px');
           root.style.setProperty('--vv-top', '0px');
@@ -857,8 +861,8 @@
     /* ===== Modal ===== */
     .modal-box { animation: scaleIn 0.28s cubic-bezier(0.16, 1, 0.3, 1); background: var(--surface); color: var(--text); }
     /* inputModal: ยึดความสูงตาม visual viewport (พื้นที่ที่เห็นจริงเหนือคีย์บอร์ด)
-       จัดกึ่งกลางในพื้นที่นั้น → คีย์บอร์ดปิด = กลางจอ, คีย์บอร์ดเปิด = กลางพื้นที่ที่เหลือ
-       (ลอยเหนือคีย์บอร์ดพอดีโดยอัตโนมัติ) */
+       - คีย์บอร์ดปิด: จัดกึ่งกลาง = อยู่กลางจอ
+       - คีย์บอร์ดเปิด (body.keyboard-open): ชิดล่าง = ลอยเหนือคีย์บอร์ดนิดเดียว ไม่ดันขึ้นกลางจอ */
     #inputModal {
       align-items: center;
       z-index: 90; /* สูงกว่า onboarding (80) เพื่อให้สร้างทริปจากออนบอร์ดดิ้งได้ */
@@ -871,6 +875,12 @@
       padding-bottom: 16px;
     }
     #inputModal .modal-box { margin: auto 0; }
+    /* เมื่อคีย์บอร์ดเปิด → ดัน modal ลงไปชิดล่าง เว้นจากคีย์บอร์ดแค่ 12px */
+    body.keyboard-open #inputModal {
+      align-items: flex-end;
+      padding-bottom: 12px;
+    }
+    body.keyboard-open #inputModal .modal-box { margin: 0 auto; }
     #actionSheet .modal-box { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
     .modal-overlay { background: color-mix(in srgb, #000 50%, transparent); backdrop-filter: blur(4px); }
     html.dark .modal-overlay { background: color-mix(in srgb, #000 65%, transparent); }
