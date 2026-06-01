@@ -3521,52 +3521,142 @@
     return data;
   }
 
+  // สร้าง temp id เดียวที่ใช้ร่วมกันระหว่าง queue arg, optimistic record, และ backend matching
+  function newTempId() {
+    return 'off_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  }
+
+  // ประทับ _tempId ลงใน args ก่อน queue เพื่อให้ id ตรงกันทุกที่
+  function stampTempId(fnName, args) {
+    if (fnName === 'addExpense' && args[0] && !args[0]._tempId) {
+      args[0]._tempId = newTempId();
+    }
+  }
+
+  // เขียน appState ปัจจุบันลง cache ของ active trip (กันปิด/เปิดแอปตอน offline แล้วข้อมูลหาย)
+  function persistActiveCache() {
+    try {
+      if (!appState || !appState.activeTripId) return;
+      const ck = 'trip_cache_' + appState.activeTripId;
+      localStorage.setItem(ck, JSON.stringify(appState));
+    } catch (e) { console.warn('persist cache failed', e); }
+  }
+
+  function baseAmountFor(amt, cur, rate) {
+    amt = parseFloat(amt) || 0; rate = parseFloat(rate) || 1;
+    const s = currencySettings[cur];
+    if (cur !== 'THB' && s) return s.type === 'multiply' ? amt * rate : amt / rate;
+    return amt;
+  }
+  const NON_SPEND = ['Repayment', 'Topup', 'Refund'];
+
   // optimistic update: จำลองผลของ write operation ใน appState ทันที (ตอนออฟไลน์)
   // เพื่อให้รายการแสดงบนจอเลย ไม่ "หาย" ระหว่างรอ sync
   function applyOptimistic(fnName, args) {
     if (!appState) return;
+    const active = appState.activeTripId;
+
     if (fnName === 'addExpense') {
       const d = args[0] || {};
-      if (d.tripId && d.tripId !== appState.activeTripId) return; // คนละทริป
+      if (d.tripId && d.tripId !== active) return; // คนละทริป
       const amt = parseFloat(d.amount) || 0;
       const rate = parseFloat(d.exchangeRate) || 1;
       const cur = d.currency || 'THB';
-      const s = currencySettings[cur];
-      let base = amt;
-      if (cur !== 'THB' && s) base = s.type === 'multiply' ? amt * rate : amt / rate;
+      const base = baseAmountFor(amt, cur, rate);
       const rec = {
-        id: 'off_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        id: d._tempId || newTempId(),
         date: d.date ? new Date(d.date + 'T12:00:00').toISOString() : new Date().toISOString(),
         item: d.item || '', category: d.category, payer: d.payer,
         amount: amt, currency: cur, exchangeRate: rate, baseAmount: base,
         details: d.splitDetails || {}, note: d.note || '', type: d.type || 'Expense',
-        _pending: true // ทำเครื่องหมายว่ายังไม่ sync
+        _pending: true
       };
       appState.history = appState.history || [];
       appState.history.unshift(rec);
-      // อัปเดตยอดรวม (เฉพาะรายจ่ายจริง)
-      if (!['Repayment', 'Topup', 'Refund'].includes(rec.type)) {
-        appState.totalSpent = (appState.totalSpent || 0) + base;
+      if (!NON_SPEND.includes(rec.type)) appState.totalSpent = (appState.totalSpent || 0) + base;
+
+    } else if (fnName === 'editExpense') {
+      const d = args[0] || {};
+      const h = (appState.history || []).find(x => String(x.id) === String(d.id));
+      if (h) {
+        const amt = parseFloat(d.amount) || 0;
+        const rate = parseFloat(d.exchangeRate) || 1;
+        const cur = d.currency || 'THB';
+        const newBase = baseAmountFor(amt, cur, rate);
+        // ปรับ totalSpent: ถอนของเก่า ใส่ของใหม่ (เฉพาะรายจ่ายจริง)
+        if (!NON_SPEND.includes(h.type)) appState.totalSpent = (appState.totalSpent || 0) - (h.baseAmount || 0);
+        h.item = d.item != null ? d.item : h.item;
+        h.category = d.category != null ? d.category : h.category;
+        h.payer = d.payer != null ? d.payer : h.payer;
+        h.amount = amt; h.currency = cur; h.exchangeRate = rate; h.baseAmount = newBase;
+        h.details = d.splitDetails || h.details; h.note = d.note != null ? d.note : h.note;
+        h.type = d.type || h.type; h._pending = true;
+        if (d.date) h.date = new Date(d.date + 'T12:00:00').toISOString();
+        if (!NON_SPEND.includes(h.type)) appState.totalSpent = (appState.totalSpent || 0) + newBase;
       }
+
     } else if (fnName === 'deleteExpense') {
       const id = args[0];
       if (appState.history) {
         const rec = appState.history.find(h => String(h.id) === String(id));
-        if (rec && !['Repayment', 'Topup', 'Refund'].includes(rec.type)) {
+        if (rec && !NON_SPEND.includes(rec.type)) {
           appState.totalSpent = Math.max(0, (appState.totalSpent || 0) - (rec.baseAmount || 0));
         }
         appState.history = appState.history.filter(h => String(h.id) !== String(id));
       }
+
+    } else if (fnName === 'addParticipant') {
+      const name = args[0], tripId = args[1];
+      if (tripId === active && name) {
+        appState.participants = appState.participants || [];
+        if (!appState.participants.includes(name)) appState.participants.push(name);
+      }
+
+    } else if (fnName === 'deleteParticipant') {
+      const name = args[0], tripId = args[1];
+      if (tripId === active && appState.participants) {
+        appState.participants = appState.participants.filter(p => p !== name);
+      }
+
+    } else if (fnName === 'addCategory') {
+      const name = args[0], icon = args[1];
+      appState.categories = appState.categories || [];
+      if (!appState.categories.some(c => c.name === name)) {
+        appState.categories.push({ name, icon: icon || '📦' });
+      }
+
+    } else if (fnName === 'addTrip') {
+      const name = args[0];
+      const tempTripId = newTempId();
+      appState.trips = appState.trips || [];
+      appState.trips.push({ id: tempTripId, name: String(name || ''), createdAt: new Date().toISOString(), hasPool: false, _pending: true });
+      // ผูก temp trip id เข้ากับ item ล่าสุดใน queue (addTrip) เพื่อให้ remap ตอน sync ได้
+      updateQueueHeadTail('addTrip', it => { it._optimisticTripId = tempTripId; });
+
+    } else if (fnName === 'renameTrip') {
+      const tripId = args[0], newName = args[1];
+      const tr = (appState.trips || []).find(x => String(x.id) === String(tripId));
+      if (tr) tr.name = String(newName || '');
+
+    } else if (fnName === 'setTripPool') {
+      const tripId = args[0], enabled = args[1];
+      const tr = (appState.trips || []).find(x => String(x.id) === String(tripId));
+      if (tr) tr.hasPool = (enabled === true || enabled === 'true');
+      if (String(tripId) === String(active)) appState.hasPool = (enabled === true || enabled === 'true');
     }
+    // addTopupAll / refundPool: ผลกระทบซับซ้อน (หลาย record + คำนวณ pool)
+    // แสดง toast "บันทึกออฟไลน์" พอ แล้วให้ backend คำนวณจริงตอน sync
     // หมายเหตุ: ยอดหาร/settlements จะถูกคำนวณใหม่ครบถ้วนเมื่อ sync เสร็จ (ดึงจาก backend)
   }
 
   function callBackend(fnName, args, onSuccess) {
     // ถ้า offline และเป็น write operation: queue ไว้และ optimistic update
     if (!isOnline() && OFFLINE_WRITABLE.has(fnName)) {
+      stampTempId(fnName, args);
       pushOfflineQueue(fnName, args);
       // optimistic update: อัปเดต appState ในเครื่องทันที เพื่อให้รายการแสดงเลย ไม่ "หาย"
       try { applyOptimistic(fnName, args); } catch (e) { console.error('optimistic err', e); }
+      persistActiveCache(); // เขียน cache ทับ เพื่อกันปิด/เปิดแอปแล้วข้อมูลหาย
       showToast(t('saved_offline'), 'success');
       resetSubmitButton();
       try { onSuccess(appState); } catch (e) { console.error(e); }
@@ -3620,8 +3710,10 @@
         hideProgress();
         // ถ้า failure: write op → queue, read op → ลอง cache, fallback → appState ปัจจุบัน
         if (OFFLINE_WRITABLE.has(fnName)) {
+          stampTempId(fnName, args);
           pushOfflineQueue(fnName, args);
           try { applyOptimistic(fnName, args); } catch (e) { console.error('optimistic err', e); }
+          persistActiveCache();
           showToast(t('saved_offline'), 'success');
           resetSubmitButton();
           try { onSuccess(appState); } catch (e) { console.error(e); }
@@ -6384,9 +6476,26 @@
 
   function pushOfflineQueue(fnName, args) {
     const queue = getOfflineQueue();
-    queue.push({ fnName, args, ts: Date.now(), id: 'off_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) });
+    queue.push({ fnName, args, ts: Date.now(), retries: 0, id: 'off_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) });
     localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
     updateOfflineUI();
+  }
+
+  // อัปเดต item แรกใน queue (เช่น เพิ่ม retries) โดยไม่เปลี่ยนลำดับ
+  function updateQueueHead(mutator) {
+    const queue = getOfflineQueue();
+    if (queue.length === 0) return;
+    mutator(queue[0]);
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+  }
+
+  // อัปเดต item ล่าสุดใน queue ที่ตรงชื่อฟังก์ชัน (ใช้ตอน optimistic ผูกค่าเพิ่ม)
+  function updateQueueHeadTail(fnName, mutator) {
+    const queue = getOfflineQueue();
+    for (let i = queue.length - 1; i >= 0; i--) {
+      if (queue[i].fnName === fnName) { mutator(queue[i]); break; }
+    }
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
   }
 
   function popOfflineQueueItem(id) {
@@ -6403,6 +6512,144 @@
 
   function isOnline() {
     return typeof navigator !== 'undefined' ? navigator.onLine : true;
+  }
+
+  // ============ TEMP-ID → REAL-ID MAPPING ============
+  // ตอน offline addExpense/addTrip สร้าง id ชั่วคราว (off_xxx)
+  // เมื่อ sync สำเร็จ backend คืน _newId จริง — เราจำ map ไว้ แล้วเขียนทับ
+  // args ของ item ถัดๆ ไปใน queue (เช่น editExpense/deleteExpense ที่อ้าง id เก่า)
+  const MAX_QUEUE_RETRIES = 3;
+  const DEAD_LETTER_KEY = 'trip_offline_dead';
+
+  // หา temp id ที่ item สร้างขึ้น (ฝั่ง optimistic) เพื่อจับคู่กับ _newId จาก backend
+  function tempIdOfItem(item) {
+    if (item.fnName === 'addExpense') {
+      const d = (item.args && item.args[0]) || {};
+      return d._tempId ? String(d._tempId) : null;
+    }
+    if (item.fnName === 'addTrip') {
+      return item._optimisticTripId ? String(item._optimisticTripId) : null;
+    }
+    return null;
+  }
+
+  // แทนที่ทุกที่ใน queue ที่อ้าง tempId ให้เป็น realId
+  function remapQueueIds(queue, tempId, realId) {
+    if (!tempId || !realId) return;
+    const tid = String(tempId), rid = String(realId);
+    queue.forEach(item => {
+      const a = item.args || [];
+      // editExpense / addExpense: id อยู่ใน object arg แรก
+      if (item.fnName === 'editExpense' && a[0] && String(a[0].id) === tid) a[0].id = rid;
+      // deleteExpense: [id, tripId]
+      if (item.fnName === 'deleteExpense' && String(a[0]) === tid) a[0] = rid;
+      // operations ที่อ้าง tripId เป็น arg (เมื่อ tempId เป็น trip id)
+      ['deleteTrip', 'renameTrip', 'setTripPool', 'addParticipant', 'deleteParticipant',
+       'addCategory', 'deleteCategory', 'addTopupAll', 'refundPool'].forEach(fn => {
+        if (item.fnName !== fn) return;
+        // tripId อยู่ตำแหน่งต่างกันแล้วแต่ฟังก์ชัน — แทนทุก element ที่ตรง tempId
+        for (let i = 0; i < a.length; i++) {
+          if (String(a[i]) === tid) a[i] = rid;
+          if (a[i] && typeof a[i] === 'object' && String(a[i].tripId) === tid) a[i].tripId = rid;
+        }
+      });
+      // addExpense ที่ตามมา อาจอ้าง tripId เดิม
+      if (item.fnName === 'addExpense' && a[0] && String(a[0].tripId) === tid) a[0].tripId = rid;
+    });
+    // remap appState/cache ที่ค้างอยู่ด้วย (รายการ optimistic ที่ id ยังเป็น temp)
+    try {
+      if (appState && appState.history) {
+        appState.history.forEach(h => { if (String(h.id) === tid) h.id = rid; });
+      }
+    } catch (e) {}
+  }
+
+  function pushDeadLetter(item, reason) {
+    try {
+      const dead = JSON.parse(localStorage.getItem(DEAD_LETTER_KEY) || '[]');
+      dead.push({ ...item, deadReason: reason, deadAt: Date.now() });
+      localStorage.setItem(DEAD_LETTER_KEY, JSON.stringify(dead));
+    } catch (e) {}
+  }
+
+  // กันการ sync ซ้อน (re-entrancy) — เช่น online event + visibility event ยิงพร้อมกัน
+  let _syncing = false;
+
+  async function syncOfflineQueue() {
+    if (_syncing) return;
+    if (!isOnline()) return;
+    if (!SCRIPT_URL) return;
+    let queue = getOfflineQueue();
+    if (queue.length === 0) return;
+
+    _syncing = true;
+    try {
+      showToast(t('syncing') + ' (' + queue.length + ')', 'info');
+      let synced = 0;
+
+      // ประมวลผลทีละตัวตามลำดับ — หยุดทันทีเมื่อตัวหนึ่ง fail (รักษาลำดับ replay)
+      while (true) {
+        queue = getOfflineQueue();
+        if (queue.length === 0) break;
+        const item = queue[0];
+
+        let res, errored = false, errMsg = '';
+        try {
+          res = await fetchAPI(item.fnName, item.args);
+          if (res && res.error) { errored = true; errMsg = res.error; }
+        } catch (e) {
+          errored = true; errMsg = (e && e.message) || 'network';
+        }
+
+        if (!errored) {
+          // สำเร็จ — ถ้า backend คืน _newId ให้ remap temp→real ใน queue ที่เหลือ
+          const tempId = tempIdOfItem(item);
+          const realId = res && res._newId;
+          if (tempId && realId) {
+            const rest = getOfflineQueue().slice(1); // ตัวที่เหลือ (ยังไม่ pop)
+            remapQueueIds(rest, tempId, realId);
+            // เขียน queue กลับพร้อม remap (head จะถูก pop ด้านล่าง)
+            localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify([queue[0], ...rest]));
+          }
+          synced++;
+          popOfflineQueueItem(item.id);
+          continue;
+        }
+
+        // fail — เพิ่ม retry; ถ้าเกินเพดาน ย้ายไป dead-letter เพื่อไม่ให้ค้างถาวร
+        // ถ้าเป็น network error (offline กลางคัน) → หยุด ปล่อยไว้ sync รอบหน้า ไม่นับ retry
+        const isNetwork = /HTTP|Failed to fetch|network|NetworkError/i.test(errMsg);
+        if (isNetwork && !isOnline()) {
+          break; // เน็ตหลุดระหว่างทาง — เก็บ queue ไว้ตามเดิม
+        }
+        let dead = false;
+        updateQueueHead(it => {
+          it.retries = (it.retries || 0) + 1;
+          if (it.retries >= MAX_QUEUE_RETRIES) dead = true;
+        });
+        if (dead) {
+          pushDeadLetter(item, errMsg);
+          popOfflineQueueItem(item.id);
+          showToast('ข้ามรายการที่ sync ไม่สำเร็จ: ' + item.fnName, 'error');
+          continue; // ข้ามตัวนี้ ทำตัวถัดไป
+        }
+        // ยัง retry ได้ แต่หยุดรอบนี้ไว้ก่อน (กันยิงรัวๆ) — รอบหน้าค่อยลองใหม่
+        break;
+      }
+
+      const remaining = getOfflineQueue().length;
+      if (synced > 0) {
+        showToast(t('synced') + ' (' + synced + ')', 'success');
+        // refresh ข้อมูลจริงจาก backend (ล้าง optimistic state)
+        loadInitialData(appState && appState.activeTripId, { skipSkeletons: true, silent: true });
+      }
+      if (remaining > 0) {
+        showToast('ยังค้าง ' + remaining + ' รายการ — จะลองใหม่', 'info');
+      }
+      updateOfflineUI();
+    } finally {
+      _syncing = false;
+    }
   }
 
   function updateOfflineUI() {
@@ -6424,37 +6671,6 @@
       }
     } else {
       banner.classList.add('hidden');
-    }
-  }
-
-  async function syncOfflineQueue() {
-    if (!isOnline()) return;
-    const queue = getOfflineQueue();
-    if (queue.length === 0) return;
-    if (!SCRIPT_URL) return; // ยังไม่ตั้งค่า API endpoint
-
-    showToast(t('syncing') + ' (' + queue.length + ')', 'info');
-    let synced = 0;
-    let failed = 0;
-
-    for (const item of queue) {
-      try {
-        const res = await fetchAPI(item.fnName, item.args);
-        if (res && res.error) { failed++; }
-        else { synced++; popOfflineQueueItem(item.id); }
-      } catch (e) {
-        failed++;
-        console.error('Sync failed for', item.fnName, e);
-      }
-    }
-
-    if (synced > 0) {
-      showToast(t('synced') + ' (' + synced + ')', 'success');
-      // Refresh data to show synced state — ไม่ flash UI
-      loadInitialData(appState.activeTripId, { skipSkeletons: true, silent: true });
-    }
-    if (failed > 0) {
-      showToast('Sync failed: ' + failed + ' items', 'error');
     }
   }
 
