@@ -7,7 +7,7 @@
  * Update CACHE_VERSION เมื่อ deploy ใหม่ที่มีการเปลี่ยนแปลง — browser จะ download ใหม่หมด
  */
 
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = 'zplitz-' + CACHE_VERSION;
 
 // ไฟล์ที่จะ cache ไว้ตอน install (ครั้งแรกที่เปิดเว็บ)
@@ -27,10 +27,17 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// รับคำสั่งจากแอป — เมื่อผู้ใช้กด "อัปเดตเลย" ให้ activate SW ใหม่ทันที
+// รับคำสั่งจากแอป
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
+  if (!event.data) return;
+  // ผู้ใช้กด "อัปเดตเลย" → activate SW ใหม่ทันที
+  if (event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
+  }
+  // แอปถามเวอร์ชันที่ทำงานอยู่จริง → ตอบกลับทาง port ที่ส่งมา
+  if (event.data.type === 'GET_VERSION') {
+    const port = event.ports && event.ports[0];
+    if (port) port.postMessage({ version: CACHE_VERSION });
   }
 });
 
