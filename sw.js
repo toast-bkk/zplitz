@@ -18,12 +18,20 @@ const PRECACHE_URLS = [
 ];
 
 // Install event — pre-cache app shell
+// หมายเหตุ: ไม่เรียก skipWaiting() ที่นี่ เพื่อให้ SW ใหม่รอในสถานะ "waiting"
+//          แอปจะตรวจเจอแล้วแจ้งเตือนผู้ใช้ ให้กดอัปเดตเอง (ส่ง SKIP_WAITING มา)
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(PRECACHE_URLS))
-      .then(() => self.skipWaiting()) // active SW ใหม่ทันที
   );
+});
+
+// รับคำสั่งจากแอป — เมื่อผู้ใช้กด "อัปเดตเลย" ให้ activate SW ใหม่ทันที
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 // Activate event — ลบ cache เก่า
