@@ -443,9 +443,13 @@
     /* เมื่อแถบออฟไลน์แสดงอยู่ (ไม่มี .hidden) → banner เว้น safe-area ให้แล้ว
        header จึงไม่ต้องเว้นซ้ำ กันช่องว่างซ้อนสองชั้น */
     body:has(#offlineBanner:not(.hidden)) .app-header,
+    body:has(#syncBanner:not(.hidden)) .app-header,
     body.is-offline .app-header {
       padding-top: 8px;
     }
+    /* ไอคอน sync หมุน */
+    @keyframes sync-spin { to { transform: rotate(360deg); } }
+    .sync-spin { animation: sync-spin 0.9s linear infinite; }
     /* Trip pill — รวม logo + ชื่อทริป + ลูกศร ใน clickable surface เดียว */
     .trip-pill {
       flex: 1;
@@ -1928,6 +1932,18 @@
     <i data-lucide="wifi-off" class="h-3.5 w-3.5"></i>
     <span data-i18n="offline_banner">ออฟไลน์ — บันทึกจะ sync เมื่อกลับมาออนไลน์</span>
     <span id="pendingCount" class="hidden bg-white/20 px-2 py-0.5 rounded-full ml-1"></span>
+  </div>
+</div>
+
+<!-- Sync progress banner — แสดงตอนกำลัง sync queue (หลังกลับมา online) -->
+<div id="syncBanner" class="hidden z-[60] shrink-0" style="background: var(--accent, #2563eb); color: white; padding-top: env(safe-area-inset-top, 0px);">
+  <div class="max-w-md mx-auto px-4 py-1.5 flex items-center justify-center gap-2">
+    <i data-lucide="refresh-cw" class="h-3.5 w-3.5 sync-spin"></i>
+    <span class="text-xs font-medium"><span data-i18n="syncing">กำลัง sync...</span> <span id="syncPercent">0%</span></span>
+    <span id="syncCount" class="text-[10px] opacity-80 ml-1"></span>
+  </div>
+  <div class="h-0.5 bg-white/20">
+    <div id="syncProgressBar" class="h-full bg-white transition-all duration-300" style="width: 0%;"></div>
   </div>
 </div>
 
@@ -6575,6 +6591,26 @@
   // กันการ sync ซ้อน (re-entrancy) — เช่น online event + visibility event ยิงพร้อมกัน
   let _syncing = false;
 
+  // ============ SYNC PROGRESS BANNER ============
+  function showSyncBanner() {
+    const b = document.getElementById('syncBanner');
+    if (b) b.classList.remove('hidden');
+  }
+  function hideSyncBanner() {
+    const b = document.getElementById('syncBanner');
+    if (b) b.classList.add('hidden');
+  }
+  // done = จำนวนที่ทำเสร็จแล้ว, total = ยอดรวมตอนเริ่ม sync
+  function updateSyncProgress(done, total) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const pctEl = document.getElementById('syncPercent');
+    const barEl = document.getElementById('syncProgressBar');
+    const cntEl = document.getElementById('syncCount');
+    if (pctEl) pctEl.innerText = pct + '%';
+    if (barEl) barEl.style.width = pct + '%';
+    if (cntEl) cntEl.innerText = done + '/' + total;
+  }
+
   async function syncOfflineQueue() {
     if (_syncing) return;
     if (!isOnline()) return;
@@ -6583,8 +6619,11 @@
     if (queue.length === 0) return;
 
     _syncing = true;
+    const total = queue.length;        // ยอดรวมตอนเริ่ม (ใช้คิด %)
+    let processed = 0;                  // จำนวนที่ "จบ" แล้ว (สำเร็จ หรือ dead-letter)
     try {
-      showToast(t('syncing') + ' (' + queue.length + ')', 'info');
+      updateSyncProgress(0, total);
+      showSyncBanner();
       let synced = 0;
 
       // ประมวลผลทีละตัวตามลำดับ — หยุดทันทีเมื่อตัวหนึ่ง fail (รักษาลำดับ replay)
@@ -6613,6 +6652,8 @@
           }
           synced++;
           popOfflineQueueItem(item.id);
+          processed++;
+          updateSyncProgress(processed, total);
           continue;
         }
 
@@ -6630,6 +6671,8 @@
         if (dead) {
           pushDeadLetter(item, errMsg);
           popOfflineQueueItem(item.id);
+          processed++;
+          updateSyncProgress(processed, total);
           showToast('ข้ามรายการที่ sync ไม่สำเร็จ: ' + item.fnName, 'error');
           continue; // ข้ามตัวนี้ ทำตัวถัดไป
         }
@@ -6648,6 +6691,7 @@
       }
       updateOfflineUI();
     } finally {
+      hideSyncBanner();
       _syncing = false;
     }
   }
