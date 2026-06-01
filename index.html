@@ -2082,6 +2082,20 @@
   </div>
 </div>
 
+<!-- ===== Dead-letter (รายการ sync ไม่สำเร็จ) Modal ===== -->
+<div id="deadLetterModal" class="fixed inset-0 modal-overlay z-50 hidden items-center justify-center p-4 opacity-0 transition-opacity">
+  <div class="rounded-2xl w-full max-w-sm p-5 shadow-strong modal-box">
+    <h3 class="text-lg font-bold mb-1 text-main" data-i18n="failed_sync_title">รายการที่ sync ไม่สำเร็จ</h3>
+    <p class="text-soft text-sm mb-3" data-i18n="failed_sync_desc">รายการเหล่านี้บันทึกออฟไลน์ไว้แต่ส่งขึ้นเซิร์ฟเวอร์ไม่สำเร็จ คุณสามารถลองส่งใหม่หรือลบทิ้งได้</p>
+    <div id="deadLetterList" class="mb-4 max-h-64 overflow-y-auto"></div>
+    <div class="flex gap-3">
+      <button onclick="clearDeadLetter()" class="flex-1 py-2.5 rounded-xl font-medium text-white" style="background: var(--danger);" data-i18n="failed_sync_clear">ลบทิ้งทั้งหมด</button>
+      <button onclick="retryDeadLetter()" class="flex-1 py-2.5 rounded-xl font-medium btn-primary" data-i18n="failed_sync_retry">ลองส่งใหม่ทั้งหมด</button>
+    </div>
+    <button onclick="closeModal('deadLetterModal')" class="w-full mt-3 py-2 text-sm text-soft" data-i18n="cancel">ยกเลิก</button>
+  </div>
+</div>
+
 <!-- ===== Input Modal ===== -->
 <div id="inputModal" class="fixed inset-0 modal-overlay z-50 hidden items-center justify-center p-4 opacity-0 transition-opacity">
   <div class="rounded-2xl w-full max-w-sm p-5 shadow-strong modal-box">
@@ -2579,6 +2593,11 @@
         <span class="font-medium text-main flex-1 text-left" data-i18n="settings_theme">ธีม / โหมดมืด</span>
         <span class="text-xs surface-3 px-2 py-0.5 rounded-full font-semibold" id="themeBadge">Light</span>
       </button>
+      <button id="exportImgBtn" onclick="exportTripImage()" class="w-full flex items-center gap-3 p-2.5 rounded-lg surface-2 text-sm">
+        <i data-lucide="image-down" class="h-4 w-4 text-soft shrink-0"></i>
+        <span class="font-medium text-main flex-1 text-left" data-i18n="settings_export_img">บันทึกสรุปทริปเป็นรูป</span>
+        <i data-lucide="chevron-right" class="h-4 w-4 text-muted"></i>
+      </button>
       <button onclick="startOnboarding(true)" class="w-full flex items-center gap-3 p-2.5 rounded-lg surface-2 text-sm">
         <i data-lucide="help-circle" class="h-4 w-4 text-soft shrink-0"></i>
         <span class="font-medium text-main flex-1 text-left" data-i18n="settings_howto">วิธีใช้งาน</span>
@@ -2588,6 +2607,11 @@
         <i data-lucide="refresh-cw" class="h-4 w-4 text-soft shrink-0" id="checkUpdateIcon"></i>
         <span class="font-medium text-main flex-1 text-left" data-i18n="settings_update">ตรวจหาอัปเดต</span>
         <span class="text-xs surface-3 px-2 py-0.5 rounded-full font-semibold" id="versionBadge">v2</span>
+      </button>
+      <button id="deadLetterBtn" onclick="openDeadLetterModal()" class="hidden w-full items-center gap-3 p-2.5 rounded-lg surface-2 text-sm">
+        <i data-lucide="alert-triangle" class="h-4 w-4 shrink-0" style="color: var(--danger, #dc2626);"></i>
+        <span class="font-medium text-main flex-1 text-left" data-i18n="settings_failed_sync">รายการที่ sync ไม่สำเร็จ</span>
+        <span class="text-xs px-2 py-0.5 rounded-full font-semibold" id="deadLetterCount" style="background: var(--danger, #dc2626); color: white;">0</span>
       </button>
     </div>
   </div>
@@ -2647,8 +2671,17 @@
       settings_trip: 'ทริป',
       settings_app: 'แอป',
       settings_theme: 'ธีม / โหมดมืด',
+      settings_export_img: 'บันทึกสรุปทริปเป็นรูป',
       settings_howto: 'วิธีใช้งาน',
       settings_update: 'ตรวจหาอัปเดต',
+      settings_failed_sync: 'รายการที่ sync ไม่สำเร็จ',
+      failed_sync_title: 'รายการที่ sync ไม่สำเร็จ',
+      failed_sync_desc: 'รายการเหล่านี้บันทึกออฟไลน์ไว้แต่ส่งขึ้นเซิร์ฟเวอร์ไม่สำเร็จ คุณสามารถลองส่งใหม่หรือลบทิ้งได้',
+      failed_sync_retry: 'ลองส่งใหม่ทั้งหมด',
+      failed_sync_clear: 'ลบทิ้งทั้งหมด',
+      failed_sync_empty: 'ไม่มีรายการค้าง',
+      failed_sync_cleared: 'ลบรายการที่ค้างแล้ว',
+      failed_sync_retrying: 'กำลังลองส่งใหม่...',
       update_available: 'มีเวอร์ชันใหม่พร้อมใช้งาน',
       update_now: 'อัปเดตเลย',
       ob_skip: 'ข้าม',
@@ -2825,8 +2858,17 @@
       settings_trip: 'Trip',
       settings_app: 'App',
       settings_theme: 'Theme / Dark mode',
+      settings_export_img: 'Save trip summary as image',
       settings_howto: 'How to use',
       settings_update: 'Check for updates',
+      settings_failed_sync: 'Failed to sync',
+      failed_sync_title: 'Items that failed to sync',
+      failed_sync_desc: 'These items were saved offline but could not be sent to the server. You can retry or discard them.',
+      failed_sync_retry: 'Retry all',
+      failed_sync_clear: 'Discard all',
+      failed_sync_empty: 'No pending items',
+      failed_sync_cleared: 'Pending items cleared',
+      failed_sync_retrying: 'Retrying...',
       update_available: 'A new version is available',
       update_now: 'Update now',
       ob_skip: 'Skip',
@@ -6069,6 +6111,219 @@
     // Removed by user request — daily spending chart no longer shown
   }
 
+  // ============ EXPORT สรุปทริปเป็นรูป JPG ============
+  async function exportTripImage() {
+    if (!appState || !appState.activeTripId) {
+      return showToast(getLang() === 'en' ? 'No active trip' : 'ยังไม่ได้เลือกทริป', 'error');
+    }
+    const btn = document.getElementById('exportImgBtn');
+    if (btn) btn.classList.add('checking-update'); // หมุนไอคอน (reuse animation เดิม)
+    showToast(getLang() === 'en' ? 'Generating image...' : 'กำลังสร้างรูป...', 'info');
+
+    try {
+      await new Promise(r => setTimeout(r, 50)); // ให้ UI render toast ก่อนงานหนัก
+      const blob = await buildTripImageBlob();
+      const trip = appState.trips.find(t => t.id === appState.activeTripId);
+      const safeName = (trip && trip.name ? trip.name : 'trip').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
+      const fileName = `Zplitz-${safeName}.jpg`;
+
+      // มือถือ: ใช้ Web Share API ถ้าแชร์ไฟล์ได้ (เซฟ/ส่งต่อสะดวก)
+      const file = new File([blob], fileName, { type: 'image/jpeg' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: trip ? trip.name : 'Zplitz' });
+          if (btn) btn.classList.remove('checking-update');
+          return;
+        } catch (shareErr) {
+          if (shareErr && shareErr.name === 'AbortError') { if (btn) btn.classList.remove('checking-update'); return; }
+        }
+      }
+      // fallback: download ตรงๆ
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast(getLang() === 'en' ? 'Image saved' : 'บันทึกรูปแล้ว', 'success');
+    } catch (e) {
+      console.error('export image failed', e);
+      showToast(getLang() === 'en' ? 'Could not generate image' : 'สร้างรูปไม่สำเร็จ', 'error');
+    } finally {
+      if (btn) btn.classList.remove('checking-update');
+    }
+  }
+
+  // วาดสรุปทริปลง canvas แล้วคืนเป็น JPEG blob
+  function buildTripImageBlob() {
+    return new Promise((resolve, reject) => {
+      try {
+        const isEn = getLang() === 'en';
+        const trip = appState.trips.find(t => t.id === appState.activeTripId);
+        const tripName = trip && trip.name ? trip.name : (isEn ? 'Trip' : 'ทริป');
+        const NON_SPEND = ['Repayment', 'Topup', 'Refund'];
+        const expenses = (appState.history || [])
+          .filter(h => !NON_SPEND.includes(h.type))
+          .slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+        const participants = appState.participants || [];
+        const settlements = appState.settlements || [];
+
+        const W = 720, PAD = 40, scale = 2;
+        const fmtB = (n) => '฿' + Number(n || 0).toLocaleString(isEn ? 'en-US' : 'th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+        const dateStr = (d) => new Date(d).toLocaleDateString(isEn ? 'en-US' : 'th-TH', { day: 'numeric', month: 'short' });
+
+        // คำนวณความสูงรวมก่อน เพื่อตั้ง canvas พอดี 1 หน้า
+        const rowH = 38, sectionGap = 28, headH = 130;
+        let h = headH + 88;
+        h += sectionGap + 34 + 30 + expenses.length * rowH;
+        h += sectionGap + 34 + participants.length * rowH;
+        if (settlements.length) h += sectionGap + 34 + settlements.length * rowH;
+        h += 60;
+        const H = Math.max(h, 400);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = W * scale; canvas.height = H * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(scale, scale);
+        ctx.textBaseline = 'top';
+
+        const C = { bg: '#fdfaf3', card: '#ffffff', line: '#ece5d8', text: '#2b2b2b',
+          soft: '#7a7264', accent: '#c46a2b', good: '#16a34a', bad: '#dc2626', headBg: '#f5efe2' };
+        ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+
+        let y = 0;
+        // Header
+        ctx.fillStyle = C.accent; ctx.fillRect(0, 0, W, headH);
+        ctx.fillStyle = '#ffffff'; ctx.font = '700 30px -apple-system, system-ui, sans-serif';
+        wrapText(ctx, tripName, PAD, 28, W - PAD * 2, 34, 2);
+        ctx.font = '400 15px -apple-system, system-ui, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.88)';
+        const today = new Date().toLocaleDateString(isEn ? 'en-US' : 'th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
+        ctx.fillText((isEn ? 'Exported ' : 'สรุป ณ ') + today + '  ·  Zplitz', PAD, headH - 32);
+        y = headH + 24;
+
+        // Summary band
+        const cardW = (W - PAD * 2 - 24) / 3;
+        const cards = [
+          { label: isEn ? 'Total spent' : 'ยอดรวม', value: fmtB(appState.totalSpent) },
+          { label: isEn ? 'People' : 'จำนวนคน', value: String(participants.length) },
+          { label: isEn ? 'Entries' : 'รายการ', value: String(expenses.length) },
+        ];
+        cards.forEach((c, i) => {
+          const x = PAD + i * (cardW + 12);
+          roundRect(ctx, x, y, cardW, 64, 12); ctx.fillStyle = C.card; ctx.fill();
+          ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
+          ctx.fillStyle = C.soft; ctx.font = '500 13px -apple-system, system-ui, sans-serif';
+          ctx.fillText(c.label, x + 14, y + 12);
+          ctx.fillStyle = i === 0 ? C.accent : C.text; ctx.font = '700 22px -apple-system, system-ui, sans-serif';
+          ctx.fillText(c.value, x + 14, y + 32);
+        });
+        y += 64 + sectionGap;
+
+        // ตารางค่าใช้จ่าย
+        y = drawSectionTitle(ctx, isEn ? 'Expenses' : 'รายการค่าใช้จ่าย', PAD, y, C);
+        ctx.fillStyle = C.headBg; roundRect(ctx, PAD, y, W - PAD * 2, 30, 6); ctx.fill();
+        ctx.fillStyle = C.soft; ctx.font = '600 13px -apple-system, system-ui, sans-serif';
+        const colDate = PAD + 12, colItem = PAD + 90, colPayer = W - PAD - 230, colAmt = W - PAD - 12;
+        ctx.textAlign = 'left';
+        ctx.fillText(isEn ? 'Date' : 'วันที่', colDate, y + 8);
+        ctx.fillText(isEn ? 'Item' : 'รายการ', colItem, y + 8);
+        ctx.fillText(isEn ? 'Paid by' : 'จ่ายโดย', colPayer, y + 8);
+        ctx.textAlign = 'right'; ctx.fillText(isEn ? 'Amount' : 'จำนวน', colAmt, y + 8); ctx.textAlign = 'left';
+        y += 30;
+        if (expenses.length === 0) {
+          ctx.fillStyle = C.soft; ctx.font = '400 14px -apple-system, system-ui, sans-serif';
+          ctx.fillText(isEn ? 'No expenses yet' : 'ยังไม่มีรายการ', PAD + 4, y + 10); y += rowH;
+        }
+        expenses.forEach((e, i) => {
+          if (i % 2 === 1) { ctx.fillStyle = '#faf6ec'; ctx.fillRect(PAD, y, W - PAD * 2, rowH); }
+          ctx.fillStyle = C.soft; ctx.font = '400 13px -apple-system, system-ui, sans-serif';
+          ctx.fillText(dateStr(e.date), colDate, y + 11);
+          ctx.fillStyle = C.text; ctx.font = '500 14px -apple-system, system-ui, sans-serif';
+          ctx.fillText(clip(ctx, e.item || (isEn ? '(no name)' : '(ไม่มีชื่อ)'), colPayer - colItem - 10), colItem, y + 10);
+          const payer = e.payer === '__POOL__' ? (isEn ? 'Pool' : 'กองกลาง') : (e.payer || '-');
+          ctx.fillStyle = C.soft; ctx.font = '400 13px -apple-system, system-ui, sans-serif';
+          ctx.fillText(clip(ctx, payer, 110), colPayer, y + 11);
+          ctx.fillStyle = C.text; ctx.font = '600 14px -apple-system, system-ui, sans-serif';
+          ctx.textAlign = 'right'; ctx.fillText(fmtB(e.baseAmount), colAmt, y + 10); ctx.textAlign = 'left';
+          ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(PAD, y + rowH); ctx.lineTo(W - PAD, y + rowH); ctx.stroke();
+          y += rowH;
+        });
+        y += sectionGap;
+
+        // สรุปยอดแต่ละคน
+        y = drawSectionTitle(ctx, isEn ? 'Balance per person' : 'สรุปยอดแต่ละคน', PAD, y, C);
+        participants.forEach(name => {
+          const b = (appState.balances && appState.balances[name]) || { net: 0 };
+          ctx.fillStyle = C.text; ctx.font = '500 15px -apple-system, system-ui, sans-serif';
+          ctx.fillText(clip(ctx, name, 360), PAD + 4, y + 9);
+          const net = b.net || 0;
+          let label, col;
+          if (net > 0.5) { label = (isEn ? 'gets back ' : 'ได้คืน ') + fmtB(net); col = C.good; }
+          else if (net < -0.5) { label = (isEn ? 'owes ' : 'ต้องจ่าย ') + fmtB(Math.abs(net)); col = C.bad; }
+          else { label = isEn ? 'settled' : 'เคลียร์แล้ว'; col = C.soft; }
+          ctx.fillStyle = col; ctx.font = '600 15px -apple-system, system-ui, sans-serif';
+          ctx.textAlign = 'right'; ctx.fillText(label, W - PAD - 4, y + 9); ctx.textAlign = 'left';
+          ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(PAD, y + rowH); ctx.lineTo(W - PAD, y + rowH); ctx.stroke();
+          y += rowH;
+        });
+        y += sectionGap;
+
+        // วิธีเคลียร์หนี้
+        if (settlements.length) {
+          y = drawSectionTitle(ctx, isEn ? 'How to settle up' : 'วิธีเคลียร์หนี้', PAD, y, C);
+          settlements.forEach(s => {
+            ctx.fillStyle = C.text; ctx.font = '500 15px -apple-system, system-ui, sans-serif';
+            ctx.fillText(clip(ctx, `${s.from}  →  ${s.to}`, 360), PAD + 4, y + 9);
+            ctx.fillStyle = C.accent; ctx.font = '700 15px -apple-system, system-ui, sans-serif';
+            ctx.textAlign = 'right'; ctx.fillText(fmtB(s.amount), W - PAD - 4, y + 9); ctx.textAlign = 'left';
+            ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(PAD, y + rowH); ctx.lineTo(W - PAD, y + rowH); ctx.stroke();
+            y += rowH;
+          });
+          y += sectionGap;
+        }
+
+        // Footer
+        ctx.fillStyle = C.soft; ctx.font = '400 12px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(isEn ? 'Generated by Zplitz' : 'สร้างโดย Zplitz', W / 2, H - 30); ctx.textAlign = 'left';
+
+        canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob null')), 'image/jpeg', 0.92);
+      } catch (err) { reject(err); }
+    });
+  }
+
+  // ---- helper วาด ----
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function drawSectionTitle(ctx, text, x, y, C) {
+    ctx.fillStyle = C.accent; roundRect(ctx, x, y + 4, 4, 18, 2); ctx.fill();
+    ctx.fillStyle = C.text; ctx.font = '700 17px -apple-system, system-ui, sans-serif';
+    ctx.fillText(text, x + 14, y + 4);
+    return y + 34;
+  }
+  function clip(ctx, text, maxW) {
+    text = String(text || '');
+    if (ctx.measureText(text).width <= maxW) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+    return t + '…';
+  }
+  function wrapText(ctx, text, x, y, maxW, lineH, maxLines) {
+    const words = String(text).split(/(\s+)/);
+    let line = '', lines = [];
+    for (const w of words) {
+      if (ctx.measureText(line + w).width > maxW && line) { lines.push(line); line = w.trimStart(); }
+      else line += w;
+    }
+    if (line) lines.push(line);
+    lines = lines.slice(0, maxLines);
+    lines.forEach((ln, i) => {
+      let out = (i === maxLines - 1 && ctx.measureText(ln).width > maxW) ? clip(ctx, ln, maxW) : ln;
+      ctx.fillText(out.trim(), x, y + i * lineH);
+    });
+  }
+
   function copySettlements() {
     if (!appState.settlements || appState.settlements.length === 0) {
       return showToast('ยังไม่มียอดค้างชำระ');
@@ -6679,6 +6934,110 @@
       dead.push({ ...item, deadReason: reason, deadAt: Date.now() });
       localStorage.setItem(DEAD_LETTER_KEY, JSON.stringify(dead));
     } catch (e) {}
+    updateDeadLetterUI();
+  }
+
+  function getDeadLetter() {
+    try { return JSON.parse(localStorage.getItem(DEAD_LETTER_KEY) || '[]'); }
+    catch (e) { return []; }
+  }
+
+  // แสดง/ซ่อนปุ่มในตั้งค่าตามจำนวนรายการค้าง
+  function updateDeadLetterUI() {
+    const btn = document.getElementById('deadLetterBtn');
+    const cnt = document.getElementById('deadLetterCount');
+    if (!btn) return;
+    const n = getDeadLetter().length;
+    if (n > 0) {
+      btn.classList.remove('hidden');
+      btn.classList.add('flex');
+      if (cnt) cnt.innerText = String(n);
+    } else {
+      btn.classList.add('hidden');
+      btn.classList.remove('flex');
+    }
+  }
+
+  // แปลงชื่อ operation เป็นข้อความที่ผู้ใช้อ่านเข้าใจ
+  function deadLetterLabel(item) {
+    const en = getLang() === 'en';
+    const map = {
+      addExpense:      en ? 'Add expense'        : 'เพิ่มรายการ',
+      editExpense:     en ? 'Edit expense'       : 'แก้ไขรายการ',
+      deleteExpense:   en ? 'Delete expense'     : 'ลบรายการ',
+      addParticipant:  en ? 'Add member'         : 'เพิ่มเพื่อน',
+      deleteParticipant: en ? 'Remove member'    : 'ลบเพื่อน',
+      addTrip:         en ? 'Create trip'        : 'สร้างทริป',
+      renameTrip:      en ? 'Rename trip'        : 'เปลี่ยนชื่อทริป',
+      addCategory:     en ? 'Add category'       : 'เพิ่มหมวดหมู่',
+      setTripPool:     en ? 'Set pool'           : 'ตั้งค่ากองกลาง',
+      addTopupAll:     en ? 'Top up pool'        : 'เติมกองกลาง',
+      refundPool:      en ? 'Refund pool'        : 'คืนเงินกองกลาง',
+    };
+    let label = map[item.fnName] || item.fnName;
+    // เติมรายละเอียดถ้าพอจะดึงได้ (เช่น ชื่อรายการ/จำนวนเงิน)
+    const a = item.args || [];
+    if (item.fnName === 'addExpense' && a[0]) {
+      const d = a[0];
+      const bits = [d.item, d.amount ? (d.amount + ' ' + (d.currency || '')) : ''].filter(Boolean);
+      if (bits.length) label += ' — ' + bits.join(' · ');
+    } else if ((item.fnName === 'addParticipant' || item.fnName === 'addCategory') && a[0]) {
+      label += ' — ' + a[0];
+    } else if (item.fnName === 'renameTrip' && a[1]) {
+      label += ' — ' + a[1];
+    }
+    return label;
+  }
+
+  function openDeadLetterModal() {
+    const dead = getDeadLetter();
+    const en = getLang() === 'en';
+    const box = document.getElementById('deadLetterList');
+    if (box) {
+      if (dead.length === 0) {
+        box.innerHTML = `<p class="text-sm text-soft text-center py-4">${t('failed_sync_empty')}</p>`;
+      } else {
+        box.innerHTML = dead.map((it, i) => {
+          const when = it.deadAt ? new Date(it.deadAt).toLocaleString(en ? 'en-US' : 'th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+          return `<div class="flex items-start gap-2 p-2.5 rounded-lg surface-2 mb-2">
+            <i data-lucide="file-warning" class="h-4 w-4 shrink-0 mt-0.5" style="color: var(--danger, #dc2626);"></i>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium text-main break-words">${escapeHtml(deadLetterLabel(it))}</div>
+              <div class="text-xs text-soft mt-0.5">${escapeHtml(when)}</div>
+            </div>
+          </div>`;
+        }).join('');
+      }
+    }
+    toggleModal('deadLetterModal', true);
+    if (window.lucide) lucide.createIcons();
+  }
+
+  // ลองส่งรายการที่ค้างทั้งหมดกลับเข้า queue หลักแล้ว sync ใหม่
+  async function retryDeadLetter() {
+    const dead = getDeadLetter();
+    if (dead.length === 0) { toggleModal('deadLetterModal', false); return; }
+    if (!isOnline()) { showToast(t('offline_banner'), 'info'); return; }
+    // ย้ายกลับเข้า queue หลัก (รีเซ็ต retries) แล้วล้าง dead-letter
+    const queue = getOfflineQueue();
+    dead.forEach(it => {
+      queue.push({ fnName: it.fnName, args: it.args, ts: Date.now(), retries: 0,
+        id: 'off_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        _optimisticTripId: it._optimisticTripId });
+    });
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+    localStorage.removeItem(DEAD_LETTER_KEY);
+    updateDeadLetterUI();
+    toggleModal('deadLetterModal', false);
+    showToast(t('failed_sync_retrying'), 'info');
+    await syncOfflineQueue();
+  }
+
+  function clearDeadLetter() {
+    localStorage.removeItem(DEAD_LETTER_KEY);
+    updateDeadLetterUI();
+    toggleModal('deadLetterModal', false);
+    showToast(t('failed_sync_cleared'), 'success');
   }
 
   // กันการ sync ซ้อน (re-entrancy) — เช่น online event + visibility event ยิงพร้อมกัน
@@ -7294,6 +7653,7 @@
   // ============ INIT ============
   window.onload = () => {
     applyLang();
+    updateDeadLetterUI(); // แสดงปุ่ม "รายการ sync ไม่สำเร็จ" ถ้ามีค้างจากครั้งก่อน
 
     // Network listeners
     window.addEventListener('online', async () => {
