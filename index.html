@@ -6122,6 +6122,22 @@
 
     try {
       await new Promise(r => setTimeout(r, 50)); // ให้ UI render toast ก่อนงานหนัก
+      // รอให้ฟอนต์ของเว็บ (IBM Plex Sans Thai / Plus Jakarta Sans) โหลดเสร็จก่อนวาด
+      // มิฉะนั้น canvas จะ fallback ไปฟอนต์ระบบ
+      if (document.fonts && document.fonts.ready) {
+        try {
+          await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 2000))]);
+          // กระตุ้นให้โหลด weight ที่ใช้จริง เผื่อยังไม่ถูก trigger
+          await Promise.race([
+            Promise.all([
+              document.fonts.load("700 30px 'IBM Plex Sans Thai'"),
+              document.fonts.load("400 14px 'IBM Plex Sans Thai'"),
+              document.fonts.load("700 14px 'Plus Jakarta Sans'"),
+            ]),
+            new Promise(r => setTimeout(r, 1500)),
+          ]);
+        } catch (e) { /* ใช้ฟอนต์ที่มี */ }
+      }
       const blob = await buildTripImageBlob();
       const trip = appState.trips.find(t => t.id === appState.activeTripId);
       const safeName = (trip && trip.name ? trip.name : 'trip').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
@@ -6199,11 +6215,16 @@
         const tableW = labelColW + totalColW + nPeople * personColW;
         const W = Math.max(720, tableW + PAD * 2);
         const fmtB = (n) => '฿' + Number(n || 0).toLocaleString(isEn ? 'en-US' : 'th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-        const fmtN = (n) => Number(n || 0).toLocaleString(isEn ? 'en-US' : 'th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        // โชว์ทศนิยมเฉพาะเมื่อมีเศษ — เลขลงตัวไม่ต้องมี .00 (อ่านสะอาดขึ้น)
+        const fmtN = (n) => {
+          const v = Number(n || 0);
+          const frac = Math.abs(v % 1) > 0.005 ? 2 : 0;
+          return v.toLocaleString(isEn ? 'en-US' : 'th-TH', { minimumFractionDigits: frac, maximumFractionDigits: 2 });
+        };
         const dateStr = (d) => new Date(d).toLocaleDateString(isEn ? 'en-US' : 'th-TH', { day: 'numeric', month: 'short' });
 
         // ----- ความสูงตาราง matrix -----
-        const mRowH = 52, mHeadH = 56, mFootH = 48;
+        const mRowH = 58, mHeadH = 56, mFootH = 48;
         const matrixH = mHeadH + (expenses.length || 1) * mRowH + mFootH;
 
         // ----- คำนวณความสูง -----
@@ -6231,11 +6252,16 @@
         let y = 0;
         // ===== Header =====
         ctx.fillStyle = C.accent; ctx.fillRect(0, 0, W, headH);
-        ctx.fillStyle = '#ffffff'; ctx.font = '700 30px -apple-system, system-ui, sans-serif';
-        wrapText(ctx, tripName, PAD, 28, W - PAD * 2, 34, 2);
-        ctx.font = '400 15px -apple-system, system-ui, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.88)';
+        ctx.fillStyle = '#ffffff'; ctx.font = '700 30px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
+        wrapText(ctx, tripName, PAD, 28, W - PAD * 2 - 90, 34, 2);
+        ctx.font = '400 15px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.88)';
         const today = new Date().toLocaleDateString(isEn ? 'en-US' : 'th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
-        ctx.fillText((isEn ? 'Exported ' : 'สรุป ณ ') + today + '  ·  Zplitz', PAD, headH - 32);
+        ctx.textAlign = 'left';
+        ctx.fillText((isEn ? 'Exported ' : 'สรุป ณ ') + today, PAD, headH - 32);
+        // แบรนด์มุมขวาบน
+        ctx.textAlign = 'right'; ctx.font = '700 17px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.fillStyle = '#ffffff';
+        ctx.fillText('Zplitz', W - PAD, 30);
+        ctx.textAlign = 'left';
         y = headH + 24;
 
         // ===== Summary band: ยอดรวม / เฉลี่ยคนละ / จำนวนคน / จำนวนรายการ =====
@@ -6250,9 +6276,9 @@
           const x = PAD + i * (cardW + cardGap);
           roundRect(ctx, x, y, cardW, 64, 12); ctx.fillStyle = C.card; ctx.fill();
           ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
-          ctx.fillStyle = C.soft; ctx.font = '500 12px -apple-system, system-ui, sans-serif';
+          ctx.fillStyle = C.soft; ctx.font = '500 12px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
           ctx.fillText(clip(ctx, c.label, cardW - 20), x + 12, y + 12);
-          ctx.fillStyle = c.hi ? C.accent : C.text; ctx.font = '700 19px -apple-system, system-ui, sans-serif';
+          ctx.fillStyle = c.hi ? C.accent : C.text; ctx.font = '700 19px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
           ctx.fillText(clip(ctx, c.value, cardW - 20), x + 12, y + 33);
         });
         y += 64 + sectionGap;
@@ -6272,9 +6298,9 @@
             const x = PAD + i * (pCardW + 12);
             roundRect(ctx, x, y, pCardW, 64, 12); ctx.fillStyle = C.card; ctx.fill();
             ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
-            ctx.fillStyle = C.soft; ctx.font = '500 13px -apple-system, system-ui, sans-serif';
+            ctx.fillStyle = C.soft; ctx.font = '500 13px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
             ctx.fillText(c.label, x + 14, y + 12);
-            ctx.fillStyle = c.col; ctx.font = '700 20px -apple-system, system-ui, sans-serif';
+            ctx.fillStyle = c.col; ctx.font = '700 20px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
             ctx.fillText(c.value, x + 14, y + 32);
           });
           y += 64 + sectionGap;
@@ -6290,7 +6316,7 @@
 
         // -- header --
         ctx.fillStyle = C.headBg; roundRect(ctx, tX, y, tableW, mHeadH, 8); ctx.fill();
-        ctx.fillStyle = C.soft; ctx.font = '600 14px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'left';
+        ctx.fillStyle = C.soft; ctx.font = '600 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'left';
         ctx.fillText(isEn ? 'Item' : 'รายการ', tX + 14, y + mHeadH / 2 - 7);
         ctx.textAlign = 'right'; ctx.fillText(isEn ? 'Total' : 'รวม', colTotalX + totalColW - 14, y + mHeadH / 2 - 7);
         // avatar + ชื่อแต่ละคน
@@ -6298,9 +6324,9 @@
           const cx = personCenter(i);
           ctx.fillStyle = PCOL[i % PCOL.length];
           ctx.beginPath(); ctx.arc(cx, y + 18, 13, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = '#ffffff'; ctx.font = '700 13px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
+          ctx.fillStyle = '#ffffff'; ctx.font = '700 13px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'center';
           ctx.fillText((p || '?').charAt(0).toUpperCase(), cx, y + 11);
-          ctx.fillStyle = C.text; ctx.font = '600 13px -apple-system, system-ui, sans-serif';
+          ctx.fillStyle = C.text; ctx.font = '600 13px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
           ctx.fillText(clip(ctx, p, personColW - 12), cx, y + 34);
         });
         ctx.textAlign = 'left';
@@ -6308,24 +6334,24 @@
 
         // -- rows --
         if (expenses.length === 0) {
-          ctx.fillStyle = C.soft; ctx.font = '400 14px -apple-system, system-ui, sans-serif';
+          ctx.fillStyle = C.soft; ctx.font = '400 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
           ctx.fillText(isEn ? 'No expenses yet' : 'ยังไม่มีรายการ', tX + 14, y + 16); y += mRowH;
         }
         expenses.forEach((e, ri) => {
           if (ri % 2 === 1) { ctx.fillStyle = '#faf6ec'; ctx.fillRect(tX, y, tableW, mRowH); }
           const isPool = e.payer === '__POOL__';
           // คอลัมน์ item: ไอคอน + ชื่อ
-          ctx.font = '18px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = C.text;
+          ctx.font = '18px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = C.text;
           ctx.fillText(isPool ? '🏦' : catIcon(e.category), tX + 12, y + mRowH / 2 - 12);
-          ctx.fillStyle = C.text; ctx.font = '600 14px -apple-system, system-ui, sans-serif';
+          ctx.fillStyle = C.text; ctx.font = '600 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
           let itemLabel = e.item || (isEn ? '(no name)' : '(ไม่มีชื่อ)');
           ctx.fillText(clip(ctx, itemLabel, labelColW - 56), tX + 40, y + mRowH / 2 - 7);
           if (isPool) {
-            ctx.fillStyle = C.accent; ctx.font = '700 9px -apple-system, system-ui, sans-serif';
+            ctx.fillStyle = C.accent; ctx.font = '700 9px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
             ctx.fillText(isEn ? 'POOL' : 'กอง', tX + 40, y + mRowH / 2 + 9);
           }
           // คอลัมน์รวม
-          ctx.fillStyle = C.accent; ctx.font = '700 14px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'right';
+          ctx.fillStyle = C.accent; ctx.font = '700 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'right';
           ctx.fillText(fmtB(e.baseAmount), colTotalX + totalColW - 14, y + mRowH / 2 - 7);
           // คอลัมน์แต่ละคน
           participants.forEach((p, i) => {
@@ -6334,19 +6360,19 @@
             const isPayer = e.payer === p;
             if (isPayer) {
               // ไฮไลต์ช่องผู้จ่าย
-              ctx.fillStyle = 'rgba(196,106,43,0.16)'; roundRect(ctx, cellL + 6, y + 6, personColW - 12, mRowH - 12, 8); ctx.fill();
+              ctx.fillStyle = 'rgba(196,106,43,0.16)'; roundRect(ctx, cellL + 6, y + 7, personColW - 12, mRowH - 14, 9); ctx.fill();
               ctx.strokeStyle = C.accent; ctx.lineWidth = 1.5; ctx.stroke();
-              ctx.fillStyle = C.accent; ctx.font = '700 14px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
-              ctx.fillText(share > 0 ? fmtN(share) : '—', cx, y + mRowH / 2 - 13);
-              // ป้าย "จ่าย"
-              ctx.fillStyle = C.accent; roundRect(ctx, cx - 18, y + mRowH / 2 + 4, 36, 15, 7); ctx.fill();
-              ctx.fillStyle = '#ffffff'; ctx.font = '700 9px -apple-system, system-ui, sans-serif';
-              ctx.fillText(isEn ? 'PAID' : 'จ่าย', cx, y + mRowH / 2 + 6);
+              ctx.fillStyle = C.accent; ctx.font = '700 15px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'center';
+              ctx.fillText(share > 0 ? fmtN(share) : '—', cx, y + mRowH / 2 - 16);
+              // ป้าย "จ่าย" — เว้นจากตัวเลขให้หายใจ
+              ctx.fillStyle = C.accent; roundRect(ctx, cx - 19, y + mRowH / 2 + 6, 38, 16, 8); ctx.fill();
+              ctx.fillStyle = '#ffffff'; ctx.font = '700 9.5px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
+              ctx.fillText(isEn ? 'PAID' : 'จ่าย', cx, y + mRowH / 2 + 9);
             } else if (share === 0) {
-              ctx.fillStyle = '#c9c0b0'; ctx.font = '400 14px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
+              ctx.fillStyle = '#c9c0b0'; ctx.font = '400 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'center';
               ctx.fillText('—', cx, y + mRowH / 2 - 7);
             } else {
-              ctx.fillStyle = C.text; ctx.font = '400 14px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
+              ctx.fillStyle = C.text; ctx.font = '400 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'center';
               ctx.fillText(fmtN(share), cx, y + mRowH / 2 - 7);
             }
           });
@@ -6357,15 +6383,15 @@
 
         // -- footer: รวมส่วนแต่ละคน --
         ctx.fillStyle = C.headBg; ctx.fillRect(tX, y, tableW, mFootH);
-        ctx.fillStyle = C.text; ctx.font = '700 14px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'left';
+        ctx.fillStyle = C.text; ctx.font = '700 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'left';
         ctx.fillText(isEn ? 'Each person owes' : 'รวมส่วนแต่ละคน', tX + 14, y + mFootH / 2 - 8);
         let grand = 0;
         const personShares = participants.map(p => expenses.reduce((s, e) => s + (parseFloat(e.details && e.details[p]) || 0), 0));
         grand = personShares.reduce((s, v) => s + v, 0);
-        ctx.fillStyle = C.accent; ctx.font = '700 14px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'right';
+        ctx.fillStyle = C.accent; ctx.font = '700 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'right';
         ctx.fillText(fmtB(grand), colTotalX + totalColW - 14, y + mFootH / 2 - 8);
         participants.forEach((p, i) => {
-          ctx.fillStyle = C.text; ctx.font = '700 13px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
+          ctx.fillStyle = C.text; ctx.font = '700 13px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'center';
           ctx.fillText(fmtB(personShares[i]), personCenter(i), y + mFootH / 2 - 8);
         });
         ctx.textAlign = 'left';
@@ -6388,17 +6414,17 @@
             ang = a2;
           });
           ctx.beginPath(); ctx.arc(donutCx, donutCy, donutR * 0.58, 0, Math.PI * 2); ctx.fillStyle = C.bg; ctx.fill();
-          ctx.fillStyle = C.soft; ctx.font = '500 12px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
+          ctx.fillStyle = C.soft; ctx.font = '500 12px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'center';
           ctx.fillText(isEn ? 'Total' : 'รวม', donutCx, donutCy - 14);
-          ctx.fillStyle = C.text; ctx.font = '700 16px -apple-system, system-ui, sans-serif';
+          ctx.fillStyle = C.text; ctx.font = '700 16px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
           ctx.fillText(fmtB(catTotal), donutCx, donutCy + 2); ctx.textAlign = 'left';
           const lx = donutCx + donutR + 30; let ly = y + 6;
           catList.slice(0, 6).forEach((c, i) => {
             ctx.fillStyle = PALETTE[i % PALETTE.length]; roundRect(ctx, lx, ly + 2, 12, 12, 3); ctx.fill();
-            ctx.fillStyle = C.text; ctx.font = '500 14px -apple-system, system-ui, sans-serif';
+            ctx.fillStyle = C.text; ctx.font = '500 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
             const pct = catTotal > 0 ? Math.round(c.amt / catTotal * 100) : 0;
             ctx.fillText(clip(ctx, catIcon(c.name) + ' ' + c.name, 200), lx + 20, ly);
-            ctx.fillStyle = C.soft; ctx.font = '600 14px -apple-system, system-ui, sans-serif';
+            ctx.fillStyle = C.soft; ctx.font = '600 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
             ctx.textAlign = 'right'; ctx.fillText(fmtB(c.amt) + '  ' + pct + '%', W - PAD - 4, ly); ctx.textAlign = 'left';
             ly += 26;
           });
@@ -6407,7 +6433,7 @@
 
         // ===== ข้อมูลน่าสนใจ =====
         y = drawSectionTitle(ctx, isEn ? 'Highlights' : 'ข้อมูลน่าสนใจ', PAD, y, C);
-        ctx.font = '400 14px -apple-system, system-ui, sans-serif';
+        ctx.font = '400 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
         const facts = [];
         if (topExpense) facts.push((isEn ? '💸 Biggest expense: ' : '💸 รายการแพงสุด: ') + (topExpense.item || '-') + ' (' + fmtB(topExpense.baseAmount) + ')');
         if (topDay) facts.push((isEn ? '📅 Top spending day: ' : '📅 วันที่ใช้จ่ายเยอะสุด: ') + new Date(topDay.k).toLocaleDateString(isEn ? 'en-US' : 'th-TH', { day: 'numeric', month: 'short' }) + ' (' + fmtB(topDay.v) + ')');
@@ -6418,7 +6444,7 @@
         y += 10;
 
         // ===== Footer =====
-        ctx.fillStyle = C.soft; ctx.font = '400 12px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = C.soft; ctx.font = '400 12px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'center';
         ctx.fillText(isEn ? 'Generated by Zplitz' : 'สร้างโดย Zplitz', W / 2, H - 30); ctx.textAlign = 'left';
 
         canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob null')), 'image/jpeg', 0.92);
@@ -6434,7 +6460,7 @@
   }
   function drawSectionTitle(ctx, text, x, y, C) {
     ctx.fillStyle = C.accent; roundRect(ctx, x, y + 4, 4, 18, 2); ctx.fill();
-    ctx.fillStyle = C.text; ctx.font = '700 17px -apple-system, system-ui, sans-serif';
+    ctx.fillStyle = C.text; ctx.font = '700 17px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
     ctx.fillText(text, x + 14, y + 4);
     return y + 34;
   }
