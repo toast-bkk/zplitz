@@ -1,5 +1,5 @@
 /**
- * TripSplit Service Worker
+ * Zplitz Service Worker
  * - Cache static assets (HTML, manifest, icons)
  * - Cache CDN assets (Tailwind, Lucide, Chart.js, Fonts)
  * - Network-only for Apps Script API calls (offline behavior handled in app code)
@@ -7,8 +7,8 @@
  * Update CACHE_VERSION เมื่อ deploy ใหม่ที่มีการเปลี่ยนแปลง — browser จะ download ใหม่หมด
  */
 
-const CACHE_VERSION = 'v1';
-const CACHE_NAME = 'triptally-' + CACHE_VERSION;
+const CACHE_VERSION = 'v2';
+const CACHE_NAME = 'zplitz-' + CACHE_VERSION;
 
 // ไฟล์ที่จะ cache ไว้ตอน install (ครั้งแรกที่เปิดเว็บ)
 const PRECACHE_URLS = [
@@ -31,7 +31,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then(keys => Promise.all(
-        keys.filter(k => k.startsWith('triptally-') && k !== CACHE_NAME)
+        keys.filter(k => (k.startsWith('zplitz-') || k.startsWith('triptally-')) && k !== CACHE_NAME)
             .map(k => caches.delete(k))
       ))
       .then(() => self.clients.claim()) // ควบคุม pages ที่เปิดอยู่ทันที
