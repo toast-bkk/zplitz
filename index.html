@@ -489,6 +489,8 @@
     /* ไอคอน sync หมุน */
     @keyframes sync-spin { to { transform: rotate(360deg); } }
     .sync-spin { animation: sync-spin 0.9s linear infinite; }
+    /* หมุนไอคอนในปุ่มตรวจอัปเดต — เลือกที่ svg ลูก เพื่อให้ทนต่อการที่ lucide สร้าง svg ใหม่ */
+    .checking-update svg { animation: sync-spin 0.9s linear infinite; }
     /* Trip pill — รวม logo + ชื่อทริป + ลูกศร ใน clickable surface เดียว */
     .trip-pill {
       flex: 1;
@@ -2565,7 +2567,7 @@
         <span class="font-medium text-main flex-1 text-left" data-i18n="settings_howto">วิธีใช้งาน</span>
         <i data-lucide="chevron-right" class="h-4 w-4 text-muted"></i>
       </button>
-      <button onclick="checkForUpdate()" class="w-full flex items-center gap-3 p-2.5 rounded-lg surface-2 text-sm">
+      <button id="checkUpdateBtn" onclick="checkForUpdate()" class="w-full flex items-center gap-3 p-2.5 rounded-lg surface-2 text-sm">
         <i data-lucide="refresh-cw" class="h-4 w-4 text-soft shrink-0" id="checkUpdateIcon"></i>
         <span class="font-medium text-main flex-1 text-left" data-i18n="settings_update">ตรวจหาอัปเดต</span>
         <span class="text-xs surface-3 px-2 py-0.5 rounded-full font-semibold" id="versionBadge">v2</span>
@@ -2983,9 +2985,8 @@
     document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
       el.placeholder = t(el.dataset.i18nPlaceholder);
     });
-    // แสดงเลขเวอร์ชันใน badge (อ่านจาก APP_VERSION ให้ตรงกับ sw.js เสมอ)
-    const vb = document.getElementById('versionBadge');
-    if (vb && typeof APP_VERSION === 'string') vb.innerText = APP_VERSION;
+    // แสดงเลขเวอร์ชันใน badge — ถามจาก service worker ที่ทำงานอยู่จริง (ไม่ hardcode)
+    refreshVersionBadge();
     // Trigger re-render
     if (window.appState && window.appState.trips) updateAllUI();
   }
@@ -6667,8 +6668,24 @@
   let _syncing = false;
 
   // ============ APP UPDATE (Service Worker) ============
-  // ต้องตรงกับ CACHE_VERSION ใน sw.js — แสดงใน settings และใช้เทียบเวอร์ชัน
+  // ต้องตรงกับ CACHE_VERSION ใน sw.js — ใช้เป็น fallback ถ้าถาม SW ไม่ได้
   const APP_VERSION = 'v2';
+
+  // ถามเวอร์ชันที่ทำงานอยู่จริงจาก service worker แล้วอัปเดต badge
+  function refreshVersionBadge() {
+    const vb = document.getElementById('versionBadge');
+    if (!vb) return;
+    vb.innerText = APP_VERSION; // ตั้ง fallback ไว้ก่อน
+    try {
+      const ctrl = navigator.serviceWorker && navigator.serviceWorker.controller;
+      if (!ctrl) return; // ยังไม่มี SW คุม (เช่นเปิดครั้งแรกก่อน activate) → ใช้ fallback
+      const ch = new MessageChannel();
+      ch.port1.onmessage = (e) => {
+        if (e.data && e.data.version) vb.innerText = e.data.version;
+      };
+      ctrl.postMessage({ type: 'GET_VERSION' }, [ch.port2]);
+    } catch (e) { /* ใช้ fallback */ }
+  }
 
   function showUpdateBanner() {
     const b = document.getElementById('updateBanner');
@@ -6696,19 +6713,27 @@
   }
 
   // ผู้ใช้กดปุ่ม "ตรวจหาอัปเดต" ในตั้งค่า
+  let _checkingUpdate = false;
   async function checkForUpdate() {
-    const icon = document.getElementById('checkUpdateIcon');
-    if (icon) icon.classList.add('sync-spin');
+    if (_checkingUpdate) return;
+    _checkingUpdate = true;
+    // หมุนที่ "ปุ่ม" ไม่ใช่ที่ <i> เพราะ lucide.createIcons() จะสร้าง svg ใหม่ทับ <i> เดิม
+    // ทำให้ class ที่ใส่ไว้ที่ <i> หายไป → หมุนค้าง. ใส่ที่ปุ่มซึ่ง lucide ไม่แตะ แล้วให้ CSS หมุน svg ข้างใน
+    const btn = document.getElementById('checkUpdateBtn');
+    if (btn) btn.classList.add('checking-update');
     try {
       if (!('serviceWorker' in navigator) || !window.__swRegistration) {
         showToast(getLang() === 'en' ? 'Updates not supported on this browser' : 'เบราว์เซอร์นี้ไม่รองรับการอัปเดตอัตโนมัติ', 'info');
         return;
       }
-      await window.__swRegistration.update(); // บังคับเช็ก sw.js ใหม่จากเซิร์ฟเวอร์
-      await new Promise(r => setTimeout(r, 800)); // ให้เวลา statechange ตรวจจับ
-      const waiting = window.__swWaiting || (window.__swRegistration && window.__swRegistration.waiting);
-      if (waiting) {
-        window.__swWaiting = waiting;
+      const reg = window.__swRegistration;
+      await reg.update(); // บังคับเช็ก sw.js ใหม่จากเซิร์ฟเวอร์
+
+      // รอให้ SW ใหม่ (ถ้ามี) ติดตั้งเสร็จจริง — poll สูงสุด ~6 วิ
+      // reg.installing = กำลังโหลด/ติดตั้ง, reg.waiting = ติดตั้งเสร็จรอ activate
+      const found = await waitForWaitingWorker(reg, 6000);
+      if (found) {
+        window.__swWaiting = found;
         showUpdateBanner();
         showToast(getLang() === 'en' ? 'New version found' : 'พบเวอร์ชันใหม่', 'success');
       } else {
@@ -6718,8 +6743,40 @@
       console.warn('checkForUpdate failed', e);
       showToast(getLang() === 'en' ? 'Could not check for updates' : 'ตรวจหาอัปเดตไม่สำเร็จ', 'error');
     } finally {
-      if (icon) icon.classList.remove('sync-spin');
+      if (btn) btn.classList.remove('checking-update');
+      _checkingUpdate = false;
     }
+  }
+
+  // รอจน registration มี SW ในสถานะ waiting (ติดตั้งเสร็จ พร้อม activate) หรือหมดเวลา
+  function waitForWaitingWorker(reg, timeoutMs) {
+    return new Promise(resolve => {
+      // มีอยู่แล้ว
+      if (reg.waiting) return resolve(reg.waiting);
+      const started = Date.now();
+      const installing = reg.installing;
+
+      // ถ้ากำลังติดตั้งอยู่ → ฟัง statechange จนกลายเป็น installed
+      if (installing) {
+        installing.addEventListener('statechange', () => {
+          if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+            resolve(reg.waiting || installing);
+          }
+        });
+      }
+      // poll สำรอง — เผื่อ updatefound เกิดช้ากว่า reg.update() resolve
+      const timer = setInterval(() => {
+        if (reg.waiting) { clearInterval(timer); resolve(reg.waiting); return; }
+        if (reg.installing && reg.installing !== installing) {
+          // มี worker ใหม่เริ่มติดตั้งหลังเรียก poll
+          const w = reg.installing;
+          w.addEventListener('statechange', () => {
+            if (w.state === 'installed' && navigator.serviceWorker.controller) resolve(reg.waiting || w);
+          });
+        }
+        if (Date.now() - started > timeoutMs) { clearInterval(timer); resolve(null); }
+      }, 400);
+    });
   }
 
   // ============ SYNC PROGRESS BANNER ============
