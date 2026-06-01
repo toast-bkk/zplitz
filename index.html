@@ -851,23 +851,20 @@
     /* ===== Modal ===== */
     .modal-box { animation: scaleIn 0.28s cubic-bezier(0.16, 1, 0.3, 1); background: var(--surface); color: var(--text); }
     /* inputModal: ยึดความสูงตาม visual viewport (พื้นที่ที่เห็นจริงเหนือคีย์บอร์ด)
-       จัดชิดด้านบน (ไม่กึ่งกลาง) เพื่อให้ modal "นิ่ง" ไม่กระโดดขึ้นเยอะเวลาคีย์บอร์ดเด้ง
-       — กึ่งกลางในพื้นที่ที่เล็กลงจะทำให้ modal ลอยสูงเกินไป */
+       จัดกึ่งกลางในพื้นที่นั้น → คีย์บอร์ดปิด = กลางจอ, คีย์บอร์ดเปิด = กลางพื้นที่ที่เหลือ
+       (ลอยเหนือคีย์บอร์ดพอดีโดยอัตโนมัติ) */
     #inputModal {
-      align-items: flex-start;
+      align-items: center;
       z-index: 90; /* สูงกว่า onboarding (80) เพื่อให้สร้างทริปจากออนบอร์ดดิ้งได้ */
       height: var(--vv-height, 100dvh);
       top: var(--vv-top, 0px);
       bottom: auto;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
-      /* เว้นจากบนแบบคงที่ + เผื่อ safe-area (notch/แถบสถานะ)
-         ใช้ค่าตายตัว ไม่ผูกกับ vv-height เพราะเมื่อคีย์บอร์ดเปิด พื้นที่เล็กลง
-         จะทำให้ระยะเว้นน้อยจน modal ชนขอบบน */
-      padding-top: calc(env(safe-area-inset-top, 0px) + 56px);
+      padding-top: 16px;
       padding-bottom: 16px;
     }
-    #inputModal .modal-box { margin: 0 auto; }
+    #inputModal .modal-box { margin: auto 0; }
     #actionSheet .modal-box { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
     .modal-overlay { background: color-mix(in srgb, #000 50%, transparent); backdrop-filter: blur(4px); }
     html.dark .modal-overlay { background: color-mix(in srgb, #000 65%, transparent); }
