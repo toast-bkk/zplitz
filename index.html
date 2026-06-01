@@ -4886,7 +4886,7 @@
   function openNewTripModal() {
     document.getElementById('inputModalTitle').innerText = 'สร้างทริปใหม่';
     document.getElementById('inputModalBody').innerHTML =
-      `<input type="text" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" placeholder="ชื่อทริป เช่น โตเกียว 2026" autofocus>`;
+      `<input type="text" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" placeholder="ชื่อทริป เช่น โตเกียว 2026" autocomplete="off" autocorrect="off" spellcheck="false" name="trip-name" autofocus>`;
     toggleModal('inputModal', true);
     setTimeout(() => document.getElementById('modalInput1').focus(), 250);
     document.getElementById('inputModalSubmit').onclick = () => {
@@ -4952,7 +4952,7 @@
   function openNewFriendModal() {
     document.getElementById('inputModalTitle').innerText = 'เพิ่มเพื่อนในทริปนี้';
     document.getElementById('inputModalBody').innerHTML =
-      `<input type="text" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" placeholder="ชื่อเพื่อน...">`;
+      `<input type="text" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" placeholder="ชื่อเพื่อน..." autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" name="trip-friend-name">`;
     toggleModal('inputModal', true);
     setTimeout(() => document.getElementById('modalInput1').focus(), 250);
     document.getElementById('inputModalSubmit').onclick = () => {
@@ -4973,7 +4973,7 @@
   function openNewCategoryModal() {
     document.getElementById('inputModalTitle').innerText = 'เพิ่มหมวดหมู่ใหม่';
     document.getElementById('inputModalBody').innerHTML = `
-      <input type="text" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" placeholder="ชื่อหมวดหมู่ เช่น ของฝาก">
+      <input type="text" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" placeholder="ชื่อหมวดหมู่ เช่น ของฝาก" autocomplete="off" autocorrect="off" spellcheck="false" name="category-name">
       <input type="text" id="modalInput2" class="w-full py-2 px-3 input-themed rounded-lg" placeholder="ใส่อิโมจิ 1 ตัว เช่น 🎁" maxlength="4">
     `;
     toggleModal('inputModal', true);
@@ -5018,7 +5018,7 @@
     const trip = appState.trips.find(t => t.id === appState.activeTripId);
     document.getElementById('inputModalTitle').innerText = 'เปลี่ยนชื่อทริป';
     document.getElementById('inputModalBody').innerHTML =
-      `<input type="text" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" value="${escapeHtml(trip.name)}">`;
+      `<input type="text" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" value="${escapeHtml(trip.name)}" autocomplete="off" autocorrect="off" spellcheck="false" name="trip-name-edit">`;
     toggleModal('inputModal', true);
     setTimeout(() => document.getElementById('modalInput1').focus(), 250);
     document.getElementById('inputModalSubmit').onclick = () => {
