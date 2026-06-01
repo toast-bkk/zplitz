@@ -363,6 +363,12 @@
       scroll-behavior: smooth;
       position: relative;
     }
+    /* เมื่อ inputModal เปิด: ล็อกพื้นหลังไม่ให้ scroll
+       → iOS จะไม่ดัน/เลื่อนทั้งหน้าขึ้นตอน input ได้ focus (modal จัดตำแหน่งเองด้วย vv-height แล้ว) */
+    body:has(#inputModal:not(.hidden)) #appContent {
+      overflow: hidden;
+      touch-action: none;
+    }
 
     /* Header & Nav ไม่ย่อ ไม่เลื่อน */
     header { flex-shrink: 0; }
@@ -4888,7 +4894,7 @@
     document.getElementById('inputModalBody').innerHTML =
       `<input type="text" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" placeholder="ชื่อทริป เช่น โตเกียว 2026" autocomplete="off" autocorrect="off" spellcheck="false" name="trip-name" autofocus>`;
     toggleModal('inputModal', true);
-    setTimeout(() => document.getElementById('modalInput1').focus(), 250);
+    setTimeout(() => document.getElementById('modalInput1').focus({ preventScroll: true }), 250);
     document.getElementById('inputModalSubmit').onclick = () => {
       const val = document.getElementById('modalInput1').value.trim();
       if (!val) return;
@@ -4954,7 +4960,7 @@
     document.getElementById('inputModalBody').innerHTML =
       `<input type="text" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" placeholder="ชื่อเพื่อน..." autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" name="trip-friend-name">`;
     toggleModal('inputModal', true);
-    setTimeout(() => document.getElementById('modalInput1').focus(), 250);
+    setTimeout(() => document.getElementById('modalInput1').focus({ preventScroll: true }), 250);
     document.getElementById('inputModalSubmit').onclick = () => {
       const val = document.getElementById('modalInput1').value.trim();
       if (!val) return;
@@ -4977,7 +4983,7 @@
       <input type="text" id="modalInput2" class="w-full py-2 px-3 input-themed rounded-lg" placeholder="ใส่อิโมจิ 1 ตัว เช่น 🎁" maxlength="4">
     `;
     toggleModal('inputModal', true);
-    setTimeout(() => document.getElementById('modalInput1').focus(), 250);
+    setTimeout(() => document.getElementById('modalInput1').focus({ preventScroll: true }), 250);
     document.getElementById('inputModalSubmit').onclick = () => {
       const name = document.getElementById('modalInput1').value.trim();
       const icon = document.getElementById('modalInput2').value.trim() || '🏷️';
@@ -5020,7 +5026,7 @@
     document.getElementById('inputModalBody').innerHTML =
       `<input type="text" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" value="${escapeHtml(trip.name)}" autocomplete="off" autocorrect="off" spellcheck="false" name="trip-name-edit">`;
     toggleModal('inputModal', true);
-    setTimeout(() => document.getElementById('modalInput1').focus(), 250);
+    setTimeout(() => document.getElementById('modalInput1').focus({ preventScroll: true }), 250);
     document.getElementById('inputModalSubmit').onclick = () => {
       const val = document.getElementById('modalInput1').value.trim();
       if (!val) return;
