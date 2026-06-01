@@ -772,6 +772,14 @@
       pointer-events: none;
       display: flex; flex-direction: column; align-items: center; gap: 8px;
       padding: 12px 16px 0;
+      transition: top 0.25s ease;
+    }
+    /* เมื่อมีแถบ offline/sync อยู่บนสุด → ดัน toast ลงมาไม่ให้ทับแถบ
+       (มี safe-area บน + ความสูงแถบ ~ รวมเผื่อไว้) */
+    body:has(#offlineBanner:not(.hidden)) #toastContainer,
+    body:has(#syncBanner:not(.hidden)) #toastContainer,
+    body.is-offline #toastContainer {
+      top: calc(60px + env(safe-area-inset-top, 0px) + 34px);
     }
     .toast {
       animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -2640,6 +2648,7 @@
       save_success: 'บันทึกสำเร็จ!',
       edit_success: 'แก้ไขสำเร็จ!',
       saved_offline: 'บันทึกออฟไลน์ — จะ sync เมื่อเชื่อมต่ออินเทอร์เน็ต',
+      saved_short: 'บันทึกแล้ว',
       deleted: 'ลบสำเร็จ',
       // Summary
       trip_total: 'ยอดใช้จ่ายทริปทั้งหมด',
@@ -2811,6 +2820,7 @@
       save_success: 'Saved!',
       edit_success: 'Updated!',
       saved_offline: 'Saved offline — will sync when online',
+      saved_short: 'Saved',
       deleted: 'Deleted',
       trip_total: 'Total trip spending',
       exclude_repayment: '*Excludes personal repayments',
@@ -3673,7 +3683,8 @@
       // optimistic update: อัปเดต appState ในเครื่องทันที เพื่อให้รายการแสดงเลย ไม่ "หาย"
       try { applyOptimistic(fnName, args); } catch (e) { console.error('optimistic err', e); }
       persistActiveCache(); // เขียน cache ทับ เพื่อกันปิด/เปิดแอปแล้วข้อมูลหาย
-      showToast(t('saved_offline'), 'success');
+      // banner ออฟไลน์อธิบายเรื่อง sync อยู่แล้ว — toast แค่ยืนยันสั้นๆ ว่ากดติด ไม่ต้องซ้ำคำ
+      showToast(t('saved_short'), 'success');
       resetSubmitButton();
       try { onSuccess(appState); } catch (e) { console.error(e); }
       return;
