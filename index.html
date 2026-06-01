@@ -4419,7 +4419,7 @@
       const r = safeEvalExpr(amountEl.value);
       if (r !== null) amountEl.value = (Math.round(r * 100) / 100).toString();
     }
-    const amount = parseFloat(amountEl.value);
+    const amount = parseFloat(String(amountEl.value).replace(/,/g, ''));
     const payer = document.getElementById('payer').value;
 
     if (!payer) return showToast(getLang() === 'en' ? 'Please select who paid first' : 'กรุณาเลือกผู้จ่ายก่อน');
