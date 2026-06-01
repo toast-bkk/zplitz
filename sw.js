@@ -7,7 +7,7 @@
  * Update CACHE_VERSION เมื่อ deploy ใหม่ที่มีการเปลี่ยนแปลง — browser จะ download ใหม่หมด
  */
 
-const CACHE_VERSION = 'v2.2';
+const CACHE_VERSION = 'v2.3';
 const CACHE_NAME = 'zplitz-' + CACHE_VERSION;
 
 // ไฟล์ที่จะ cache ไว้ตอน install (ครั้งแรกที่เปิดเว็บ)
