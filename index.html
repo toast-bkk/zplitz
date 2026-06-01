@@ -3521,10 +3521,52 @@
     return data;
   }
 
+  // optimistic update: จำลองผลของ write operation ใน appState ทันที (ตอนออฟไลน์)
+  // เพื่อให้รายการแสดงบนจอเลย ไม่ "หาย" ระหว่างรอ sync
+  function applyOptimistic(fnName, args) {
+    if (!appState) return;
+    if (fnName === 'addExpense') {
+      const d = args[0] || {};
+      if (d.tripId && d.tripId !== appState.activeTripId) return; // คนละทริป
+      const amt = parseFloat(d.amount) || 0;
+      const rate = parseFloat(d.exchangeRate) || 1;
+      const cur = d.currency || 'THB';
+      const s = currencySettings[cur];
+      let base = amt;
+      if (cur !== 'THB' && s) base = s.type === 'multiply' ? amt * rate : amt / rate;
+      const rec = {
+        id: 'off_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        date: d.date ? new Date(d.date + 'T12:00:00').toISOString() : new Date().toISOString(),
+        item: d.item || '', category: d.category, payer: d.payer,
+        amount: amt, currency: cur, exchangeRate: rate, baseAmount: base,
+        details: d.splitDetails || {}, note: d.note || '', type: d.type || 'Expense',
+        _pending: true // ทำเครื่องหมายว่ายังไม่ sync
+      };
+      appState.history = appState.history || [];
+      appState.history.unshift(rec);
+      // อัปเดตยอดรวม (เฉพาะรายจ่ายจริง)
+      if (!['Repayment', 'Topup', 'Refund'].includes(rec.type)) {
+        appState.totalSpent = (appState.totalSpent || 0) + base;
+      }
+    } else if (fnName === 'deleteExpense') {
+      const id = args[0];
+      if (appState.history) {
+        const rec = appState.history.find(h => String(h.id) === String(id));
+        if (rec && !['Repayment', 'Topup', 'Refund'].includes(rec.type)) {
+          appState.totalSpent = Math.max(0, (appState.totalSpent || 0) - (rec.baseAmount || 0));
+        }
+        appState.history = appState.history.filter(h => String(h.id) !== String(id));
+      }
+    }
+    // หมายเหตุ: ยอดหาร/settlements จะถูกคำนวณใหม่ครบถ้วนเมื่อ sync เสร็จ (ดึงจาก backend)
+  }
+
   function callBackend(fnName, args, onSuccess) {
     // ถ้า offline และเป็น write operation: queue ไว้และ optimistic update
     if (!isOnline() && OFFLINE_WRITABLE.has(fnName)) {
       pushOfflineQueue(fnName, args);
+      // optimistic update: อัปเดต appState ในเครื่องทันที เพื่อให้รายการแสดงเลย ไม่ "หาย"
+      try { applyOptimistic(fnName, args); } catch (e) { console.error('optimistic err', e); }
       showToast(t('saved_offline'), 'success');
       resetSubmitButton();
       try { onSuccess(appState); } catch (e) { console.error(e); }
@@ -3579,6 +3621,7 @@
         // ถ้า failure: write op → queue, read op → ลอง cache, fallback → appState ปัจจุบัน
         if (OFFLINE_WRITABLE.has(fnName)) {
           pushOfflineQueue(fnName, args);
+          try { applyOptimistic(fnName, args); } catch (e) { console.error('optimistic err', e); }
           showToast(t('saved_offline'), 'success');
           resetSubmitButton();
           try { onSuccess(appState); } catch (e) { console.error(e); }
