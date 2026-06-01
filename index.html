@@ -94,13 +94,51 @@
     })();
   </script>
 
-  <!-- Service Worker registration — เปิดให้ใช้แบบออฟไลน์ได้ -->
+  <!-- Service Worker registration — เปิดให้ใช้แบบออฟไลน์ได้ + ตรวจหาอัปเดต -->
   <script>
+    // เก็บ reference ของ SW ที่ติดตั้งใหม่และรออยู่ (waiting) ไว้ให้ปุ่ม "อัปเดตเลย" เรียกใช้
+    window.__swRegistration = null;
+    window.__swWaiting = null;
+    window.__swReloading = false;
+
+    // เรียกเมื่อพบ SW ใหม่ที่พร้อมใช้ — แจ้งเตือนผู้ใช้ (ฟังก์ชันจริงนิยามในสคริปต์หลักด้านล่าง)
+    function __onUpdateReady(worker) {
+      window.__swWaiting = worker;
+      if (typeof showUpdateBanner === 'function') showUpdateBanner();
+    }
+
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('sw.js')
-          .then(reg => console.log('SW registered:', reg.scope))
+          .then(reg => {
+            window.__swRegistration = reg;
+            console.log('SW registered:', reg.scope);
+
+            // ถ้ามี SW รออยู่แล้วตั้งแต่โหลด (เคยติดตั้งไว้รอบก่อน) → แจ้งเลย
+            if (reg.waiting && navigator.serviceWorker.controller) {
+              __onUpdateReady(reg.waiting);
+            }
+
+            // ตรวจจับ SW ใหม่ที่กำลังติดตั้ง
+            reg.addEventListener('updatefound', () => {
+              const newWorker = reg.installing;
+              if (!newWorker) return;
+              newWorker.addEventListener('statechange', () => {
+                // installed + มี controller เดิมอยู่ = เป็นการ "อัปเดต" (ไม่ใช่ติดตั้งครั้งแรก)
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  __onUpdateReady(newWorker);
+                }
+              });
+            });
+          })
           .catch(err => console.warn('SW registration failed:', err));
+
+        // เมื่อ SW ใหม่เข้าควบคุมแล้ว → reload หน้าครั้งเดียวเพื่อโหลดโค้ดใหม่
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (window.__swReloading) return;
+          window.__swReloading = true;
+          window.location.reload();
+        });
       });
     }
   </script>
@@ -444,6 +482,7 @@
        header จึงไม่ต้องเว้นซ้ำ กันช่องว่างซ้อนสองชั้น */
     body:has(#offlineBanner:not(.hidden)) .app-header,
     body:has(#syncBanner:not(.hidden)) .app-header,
+    body:has(#updateBanner:not(.hidden)) .app-header,
     body.is-offline .app-header {
       padding-top: 8px;
     }
@@ -778,6 +817,7 @@
        (มี safe-area บน + ความสูงแถบ ~ รวมเผื่อไว้) */
     body:has(#offlineBanner:not(.hidden)) #toastContainer,
     body:has(#syncBanner:not(.hidden)) #toastContainer,
+    body:has(#updateBanner:not(.hidden)) #toastContainer,
     body.is-offline #toastContainer {
       top: calc(60px + env(safe-area-inset-top, 0px) + 34px);
     }
@@ -1955,6 +1995,16 @@
   </div>
 </div>
 
+<!-- Update available banner — แสดงเมื่อมีเวอร์ชันใหม่พร้อมติดตั้ง -->
+<div id="updateBanner" class="hidden z-[60] shrink-0" style="background: var(--success, #16a34a); color: white; padding-top: env(safe-area-inset-top, 0px);">
+  <div class="max-w-md mx-auto px-4 py-2 flex items-center justify-center gap-2">
+    <i data-lucide="sparkles" class="h-3.5 w-3.5 shrink-0"></i>
+    <span class="text-xs font-medium" data-i18n="update_available">มีเวอร์ชันใหม่พร้อมใช้งาน</span>
+    <button onclick="applyUpdate()" class="text-xs font-bold bg-white/20 hover:bg-white/30 px-3 py-1 rounded-full ml-1 transition-colors" data-i18n="update_now">อัปเดตเลย</button>
+    <button onclick="dismissUpdateBanner()" class="opacity-70 hover:opacity-100 ml-0.5" aria-label="ปิด"><i data-lucide="x" class="h-3.5 w-3.5"></i></button>
+  </div>
+</div>
+
 <!-- Pull to refresh indicator -->
 <div id="ptrIndicator" class="fixed left-1/2 -translate-x-1/2 z-[55] pointer-events-none opacity-0 transition-opacity" style="top: 60px;">
   <div class="surface shadow-soft rounded-full px-4 py-2 mt-2 flex items-center gap-2 text-sm border border-themed">
@@ -2515,6 +2565,11 @@
         <span class="font-medium text-main flex-1 text-left" data-i18n="settings_howto">วิธีใช้งาน</span>
         <i data-lucide="chevron-right" class="h-4 w-4 text-muted"></i>
       </button>
+      <button onclick="checkForUpdate()" class="w-full flex items-center gap-3 p-2.5 rounded-lg surface-2 text-sm">
+        <i data-lucide="refresh-cw" class="h-4 w-4 text-soft shrink-0" id="checkUpdateIcon"></i>
+        <span class="font-medium text-main flex-1 text-left" data-i18n="settings_update">ตรวจหาอัปเดต</span>
+        <span class="text-xs surface-3 px-2 py-0.5 rounded-full font-semibold" id="versionBadge">v2</span>
+      </button>
     </div>
   </div>
 
@@ -2574,6 +2629,9 @@
       settings_app: 'แอป',
       settings_theme: 'ธีม / โหมดมืด',
       settings_howto: 'วิธีใช้งาน',
+      settings_update: 'ตรวจหาอัปเดต',
+      update_available: 'มีเวอร์ชันใหม่พร้อมใช้งาน',
+      update_now: 'อัปเดตเลย',
       ob_skip: 'ข้าม',
       ob_next: 'ถัดไป',
       ob_start: 'เริ่มใช้งาน',
@@ -2749,6 +2807,9 @@
       settings_app: 'App',
       settings_theme: 'Theme / Dark mode',
       settings_howto: 'How to use',
+      settings_update: 'Check for updates',
+      update_available: 'A new version is available',
+      update_now: 'Update now',
       ob_skip: 'Skip',
       ob_next: 'Next',
       ob_start: 'Get started',
@@ -2922,6 +2983,9 @@
     document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
       el.placeholder = t(el.dataset.i18nPlaceholder);
     });
+    // แสดงเลขเวอร์ชันใน badge (อ่านจาก APP_VERSION ให้ตรงกับ sw.js เสมอ)
+    const vb = document.getElementById('versionBadge');
+    if (vb && typeof APP_VERSION === 'string') vb.innerText = APP_VERSION;
     // Trigger re-render
     if (window.appState && window.appState.trips) updateAllUI();
   }
@@ -6601,6 +6665,62 @@
 
   // กันการ sync ซ้อน (re-entrancy) — เช่น online event + visibility event ยิงพร้อมกัน
   let _syncing = false;
+
+  // ============ APP UPDATE (Service Worker) ============
+  // ต้องตรงกับ CACHE_VERSION ใน sw.js — แสดงใน settings และใช้เทียบเวอร์ชัน
+  const APP_VERSION = 'v2';
+
+  function showUpdateBanner() {
+    const b = document.getElementById('updateBanner');
+    if (b) {
+      b.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+  function dismissUpdateBanner() {
+    const b = document.getElementById('updateBanner');
+    if (b) b.classList.add('hidden');
+  }
+
+  // ผู้ใช้กด "อัปเดตเลย" — สั่ง SW ใหม่ให้ activate แล้ว controllerchange จะ reload ให้เอง
+  function applyUpdate() {
+    const waiting = window.__swWaiting;
+    if (waiting) {
+      // กันค้างกรณี controllerchange ไม่ยิง (บางเบราว์เซอร์) — reload สำรองหลัง 3 วิ
+      setTimeout(() => { if (!window.__swReloading) { window.__swReloading = true; location.reload(); } }, 3000);
+      waiting.postMessage({ type: 'SKIP_WAITING' });
+      dismissUpdateBanner();
+    } else {
+      location.reload();
+    }
+  }
+
+  // ผู้ใช้กดปุ่ม "ตรวจหาอัปเดต" ในตั้งค่า
+  async function checkForUpdate() {
+    const icon = document.getElementById('checkUpdateIcon');
+    if (icon) icon.classList.add('sync-spin');
+    try {
+      if (!('serviceWorker' in navigator) || !window.__swRegistration) {
+        showToast(getLang() === 'en' ? 'Updates not supported on this browser' : 'เบราว์เซอร์นี้ไม่รองรับการอัปเดตอัตโนมัติ', 'info');
+        return;
+      }
+      await window.__swRegistration.update(); // บังคับเช็ก sw.js ใหม่จากเซิร์ฟเวอร์
+      await new Promise(r => setTimeout(r, 800)); // ให้เวลา statechange ตรวจจับ
+      const waiting = window.__swWaiting || (window.__swRegistration && window.__swRegistration.waiting);
+      if (waiting) {
+        window.__swWaiting = waiting;
+        showUpdateBanner();
+        showToast(getLang() === 'en' ? 'New version found' : 'พบเวอร์ชันใหม่', 'success');
+      } else {
+        showToast(getLang() === 'en' ? "You're on the latest version" : 'คุณใช้เวอร์ชันล่าสุดอยู่แล้ว', 'success');
+      }
+    } catch (e) {
+      console.warn('checkForUpdate failed', e);
+      showToast(getLang() === 'en' ? 'Could not check for updates' : 'ตรวจหาอัปเดตไม่สำเร็จ', 'error');
+    } finally {
+      if (icon) icon.classList.remove('sync-spin');
+    }
+  }
 
   // ============ SYNC PROGRESS BANNER ============
   function showSyncBanner() {
