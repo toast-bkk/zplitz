@@ -6166,18 +6166,49 @@
           .slice().sort((a, b) => new Date(a.date) - new Date(b.date));
         const participants = appState.participants || [];
         const settlements = appState.settlements || [];
+        const nPeople = participants.length || 1;
+        const total = appState.totalSpent || 0;
+        const avgPerPerson = total / nPeople;
+
+        // ----- กองกลาง -----
+        const hasPool = appState.hasPool === true && appState.pool && (appState.pool.contributed || appState.pool.used);
+        const pool = appState.pool || {};
+
+        // ----- สรุปตามหมวดหมู่ (สำหรับ donut) -----
+        const catMap = {};
+        expenses.forEach(e => {
+          const key = e.category || (isEn ? 'Other' : 'อื่นๆ');
+          catMap[key] = (catMap[key] || 0) + (e.baseAmount || 0);
+        });
+        const catList = Object.entries(catMap).map(([name, amt]) => ({ name, amt }))
+          .sort((a, b) => b.amt - a.amt);
+        const catTotal = catList.reduce((s, c) => s + c.amt, 0);
+        const catIcon = (name) => { const c = (appState.categories || []).find(x => x.name === name); return c ? c.icon : '🏷️'; };
+
+        // ----- ข้อมูลน่าสนใจ -----
+        let topExpense = null;
+        expenses.forEach(e => { if (!topExpense || (e.baseAmount || 0) > (topExpense.baseAmount || 0)) topExpense = e; });
+        // วันที่ใช้จ่ายเยอะสุด
+        const byDay = {};
+        expenses.forEach(e => { const k = new Date(e.date).toDateString(); byDay[k] = (byDay[k] || 0) + (e.baseAmount || 0); });
+        let topDay = null;
+        Object.entries(byDay).forEach(([k, v]) => { if (!topDay || v > topDay.v) topDay = { k, v }; });
 
         const W = 720, PAD = 40, scale = 2;
         const fmtB = (n) => '฿' + Number(n || 0).toLocaleString(isEn ? 'en-US' : 'th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
         const dateStr = (d) => new Date(d).toLocaleDateString(isEn ? 'en-US' : 'th-TH', { day: 'numeric', month: 'short' });
 
-        // คำนวณความสูงรวมก่อน เพื่อตั้ง canvas พอดี 1 หน้า
+        // ----- คำนวณความสูง -----
         const rowH = 38, sectionGap = 28, headH = 130;
-        let h = headH + 88;
-        h += sectionGap + 34 + 30 + expenses.length * rowH;
-        h += sectionGap + 34 + participants.length * rowH;
+        let h = headH + 24 + 64 + sectionGap;            // header + summary band
+        if (hasPool) h += sectionGap + 34 + 64;          // กองกลาง (band)
+        h += sectionGap + 34 + 30 + (expenses.length || 1) * rowH; // ตาราง
+        // donut หมวดหมู่: สูงคงที่ตามจำนวนหมวด (อย่างน้อย donut 150)
+        if (catList.length) h += sectionGap + 34 + Math.max(160, catList.length * 26 + 10);
+        h += sectionGap + 34 + 30 + participants.length * rowH; // สรุปแต่ละคน (+head)
         if (settlements.length) h += sectionGap + 34 + settlements.length * rowH;
-        h += 60;
+        h += sectionGap + 34 + 2 * 30;                   // ข้อมูลน่าสนใจ (2 บรรทัด)
+        h += 60;                                          // footer
         const H = Math.max(h, 400);
 
         const canvas = document.createElement('canvas');
@@ -6188,10 +6219,12 @@
 
         const C = { bg: '#fdfaf3', card: '#ffffff', line: '#ece5d8', text: '#2b2b2b',
           soft: '#7a7264', accent: '#c46a2b', good: '#16a34a', bad: '#dc2626', headBg: '#f5efe2' };
+        // จานสีสำหรับ donut
+        const PALETTE = ['#c46a2b', '#2b8ac4', '#16a34a', '#d4a017', '#9b5de5', '#e0607e', '#3fa7a0', '#7a7264', '#c4452b', '#5a8f3c'];
         ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
 
         let y = 0;
-        // Header
+        // ===== Header =====
         ctx.fillStyle = C.accent; ctx.fillRect(0, 0, W, headH);
         ctx.fillStyle = '#ffffff'; ctx.font = '700 30px -apple-system, system-ui, sans-serif';
         wrapText(ctx, tripName, PAD, 28, W - PAD * 2, 34, 2);
@@ -6200,12 +6233,12 @@
         ctx.fillText((isEn ? 'Exported ' : 'สรุป ณ ') + today + '  ·  Zplitz', PAD, headH - 32);
         y = headH + 24;
 
-        // Summary band
+        // ===== Summary band: ยอดรวม / เฉลี่ยคนละ / จำนวนคน =====
         const cardW = (W - PAD * 2 - 24) / 3;
         const cards = [
-          { label: isEn ? 'Total spent' : 'ยอดรวม', value: fmtB(appState.totalSpent) },
-          { label: isEn ? 'People' : 'จำนวนคน', value: String(participants.length) },
-          { label: isEn ? 'Entries' : 'รายการ', value: String(expenses.length) },
+          { label: isEn ? 'Total spent' : 'ยอดรวม', value: fmtB(total), hi: true },
+          { label: isEn ? 'Avg / person' : 'เฉลี่ยคนละ', value: fmtB(avgPerPerson), hi: true },
+          { label: isEn ? 'People · Entries' : 'คน · รายการ', value: nPeople + ' · ' + expenses.length },
         ];
         cards.forEach((c, i) => {
           const x = PAD + i * (cardW + 12);
@@ -6213,12 +6246,35 @@
           ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
           ctx.fillStyle = C.soft; ctx.font = '500 13px -apple-system, system-ui, sans-serif';
           ctx.fillText(c.label, x + 14, y + 12);
-          ctx.fillStyle = i === 0 ? C.accent : C.text; ctx.font = '700 22px -apple-system, system-ui, sans-serif';
+          ctx.fillStyle = c.hi ? C.accent : C.text; ctx.font = '700 21px -apple-system, system-ui, sans-serif';
           ctx.fillText(c.value, x + 14, y + 32);
         });
         y += 64 + sectionGap;
 
-        // ตารางค่าใช้จ่าย
+        // ===== กองกลาง =====
+        if (hasPool) {
+          y = drawSectionTitle(ctx, isEn ? 'Shared pool' : 'เงินกองกลาง', PAD, y, C);
+          const pCardW = (W - PAD * 2 - 24) / 3;
+          const remain = pool.remaining || 0;
+          const remainCol = remain > 0.5 ? C.good : remain < -0.5 ? C.bad : C.soft;
+          const pcards = [
+            { label: isEn ? 'Contributed' : 'เติมเข้า', value: fmtB(pool.contributed), col: C.text },
+            { label: isEn ? 'Used' : 'ใช้ไป', value: fmtB(pool.used), col: C.text },
+            { label: isEn ? 'Remaining' : 'คงเหลือ', value: fmtB(remain), col: remainCol },
+          ];
+          pcards.forEach((c, i) => {
+            const x = PAD + i * (pCardW + 12);
+            roundRect(ctx, x, y, pCardW, 64, 12); ctx.fillStyle = C.card; ctx.fill();
+            ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
+            ctx.fillStyle = C.soft; ctx.font = '500 13px -apple-system, system-ui, sans-serif';
+            ctx.fillText(c.label, x + 14, y + 12);
+            ctx.fillStyle = c.col; ctx.font = '700 20px -apple-system, system-ui, sans-serif';
+            ctx.fillText(c.value, x + 14, y + 32);
+          });
+          y += 64 + sectionGap;
+        }
+
+        // ===== ตารางค่าใช้จ่าย =====
         y = drawSectionTitle(ctx, isEn ? 'Expenses' : 'รายการค่าใช้จ่าย', PAD, y, C);
         ctx.fillStyle = C.headBg; roundRect(ctx, PAD, y, W - PAD * 2, 30, 6); ctx.fill();
         ctx.fillStyle = C.soft; ctx.font = '600 13px -apple-system, system-ui, sans-serif';
@@ -6249,25 +6305,70 @@
         });
         y += sectionGap;
 
-        // สรุปยอดแต่ละคน
+        // ===== สรุปตามหมวดหมู่ (donut + รายการ) =====
+        if (catList.length) {
+          y = drawSectionTitle(ctx, isEn ? 'Spending by category' : 'แบ่งตามหมวดหมู่', PAD, y, C);
+          const donutR = 70, donutCx = PAD + donutR + 10, donutCy = y + donutR + 4;
+          // วาด donut
+          let ang = -Math.PI / 2;
+          catList.forEach((c, i) => {
+            const frac = catTotal > 0 ? c.amt / catTotal : 0;
+            const a2 = ang + frac * Math.PI * 2;
+            ctx.beginPath(); ctx.moveTo(donutCx, donutCy);
+            ctx.arc(donutCx, donutCy, donutR, ang, a2); ctx.closePath();
+            ctx.fillStyle = PALETTE[i % PALETTE.length]; ctx.fill();
+            ang = a2;
+          });
+          // เจาะรูกลาง
+          ctx.beginPath(); ctx.arc(donutCx, donutCy, donutR * 0.58, 0, Math.PI * 2); ctx.fillStyle = C.bg; ctx.fill();
+          ctx.fillStyle = C.soft; ctx.font = '500 12px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
+          ctx.fillText(isEn ? 'Total' : 'รวม', donutCx, donutCy - 14);
+          ctx.fillStyle = C.text; ctx.font = '700 16px -apple-system, system-ui, sans-serif';
+          ctx.fillText(fmtB(catTotal), donutCx, donutCy + 2); ctx.textAlign = 'left';
+          // legend ด้านขวา
+          const lx = donutCx + donutR + 30; let ly = y + 6;
+          catList.slice(0, 6).forEach((c, i) => {
+            ctx.fillStyle = PALETTE[i % PALETTE.length]; roundRect(ctx, lx, ly + 2, 12, 12, 3); ctx.fill();
+            ctx.fillStyle = C.text; ctx.font = '500 14px -apple-system, system-ui, sans-serif';
+            const pct = catTotal > 0 ? Math.round(c.amt / catTotal * 100) : 0;
+            ctx.fillText(clip(ctx, catIcon(c.name) + ' ' + c.name, 200), lx + 20, ly);
+            ctx.fillStyle = C.soft; ctx.font = '600 14px -apple-system, system-ui, sans-serif';
+            ctx.textAlign = 'right'; ctx.fillText(fmtB(c.amt) + '  ' + pct + '%', W - PAD - 4, ly); ctx.textAlign = 'left';
+            ly += 26;
+          });
+          y += Math.max(160, catList.slice(0, 6).length * 26 + 10) + sectionGap;
+        }
+
+        // ===== สรุปยอดแต่ละคน (เพิ่มคอลัมน์ หารคนละ) =====
         y = drawSectionTitle(ctx, isEn ? 'Balance per person' : 'สรุปยอดแต่ละคน', PAD, y, C);
+        ctx.fillStyle = C.headBg; roundRect(ctx, PAD, y, W - PAD * 2, 30, 6); ctx.fill();
+        ctx.fillStyle = C.soft; ctx.font = '600 13px -apple-system, system-ui, sans-serif';
+        const pName = PAD + 12, pShare = W - PAD - 320, pPaid = W - PAD - 180, pNet = W - PAD - 12;
+        ctx.fillText(isEn ? 'Name' : 'ชื่อ', pName, y + 8);
+        ctx.textAlign = 'right';
+        ctx.fillText(isEn ? 'Share' : 'หารคนละ', pShare + 60, y + 8);
+        ctx.fillText(isEn ? 'Paid' : 'จ่ายจริง', pPaid + 60, y + 8);
+        ctx.fillText(isEn ? 'Net' : 'สุทธิ', pNet, y + 8);
+        ctx.textAlign = 'left'; y += 30;
         participants.forEach(name => {
-          const b = (appState.balances && appState.balances[name]) || { net: 0 };
+          const b = (appState.balances && appState.balances[name]) || { net: 0, share: 0, paid: 0 };
           ctx.fillStyle = C.text; ctx.font = '500 15px -apple-system, system-ui, sans-serif';
-          ctx.fillText(clip(ctx, name, 360), PAD + 4, y + 9);
+          ctx.fillText(clip(ctx, name, pShare - pName - 10), pName, y + 9);
+          ctx.font = '400 14px -apple-system, system-ui, sans-serif'; ctx.fillStyle = C.soft;
+          ctx.textAlign = 'right';
+          ctx.fillText(fmtB(b.share), pShare + 60, y + 9);
+          ctx.fillText(fmtB(b.paid), pPaid + 60, y + 9);
           const net = b.net || 0;
-          let label, col;
-          if (net > 0.5) { label = (isEn ? 'gets back ' : 'ได้คืน ') + fmtB(net); col = C.good; }
-          else if (net < -0.5) { label = (isEn ? 'owes ' : 'ต้องจ่าย ') + fmtB(Math.abs(net)); col = C.bad; }
-          else { label = isEn ? 'settled' : 'เคลียร์แล้ว'; col = C.soft; }
-          ctx.fillStyle = col; ctx.font = '600 15px -apple-system, system-ui, sans-serif';
-          ctx.textAlign = 'right'; ctx.fillText(label, W - PAD - 4, y + 9); ctx.textAlign = 'left';
+          let col = net > 0.5 ? C.good : net < -0.5 ? C.bad : C.soft;
+          const netStr = net > 0.5 ? '+' + fmtB(net) : net < -0.5 ? '-' + fmtB(Math.abs(net)) : (isEn ? 'even' : 'เท่ากัน');
+          ctx.fillStyle = col; ctx.font = '700 15px -apple-system, system-ui, sans-serif';
+          ctx.fillText(netStr, pNet, y + 9); ctx.textAlign = 'left';
           ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(PAD, y + rowH); ctx.lineTo(W - PAD, y + rowH); ctx.stroke();
           y += rowH;
         });
         y += sectionGap;
 
-        // วิธีเคลียร์หนี้
+        // ===== วิธีเคลียร์หนี้ =====
         if (settlements.length) {
           y = drawSectionTitle(ctx, isEn ? 'How to settle up' : 'วิธีเคลียร์หนี้', PAD, y, C);
           settlements.forEach(s => {
@@ -6281,7 +6382,19 @@
           y += sectionGap;
         }
 
-        // Footer
+        // ===== ข้อมูลน่าสนใจ =====
+        y = drawSectionTitle(ctx, isEn ? 'Highlights' : 'ข้อมูลน่าสนใจ', PAD, y, C);
+        ctx.font = '400 14px -apple-system, system-ui, sans-serif';
+        const facts = [];
+        if (topExpense) facts.push((isEn ? '💸 Biggest expense: ' : '💸 รายการแพงสุด: ') + (topExpense.item || '-') + ' (' + fmtB(topExpense.baseAmount) + ')');
+        if (topDay) facts.push((isEn ? '📅 Top spending day: ' : '📅 วันที่ใช้จ่ายเยอะสุด: ') + new Date(topDay.k).toLocaleDateString(isEn ? 'en-US' : 'th-TH', { day: 'numeric', month: 'short' }) + ' (' + fmtB(topDay.v) + ')');
+        if (catList.length) facts.push((isEn ? '🏆 Top category: ' : '🏆 หมวดที่ใช้มากสุด: ') + catList[0].name + ' (' + fmtB(catList[0].amt) + ')');
+        facts.slice(0, 3).forEach(f => {
+          ctx.fillStyle = C.text; ctx.fillText(clip(ctx, f, W - PAD * 2 - 8), PAD + 4, y + 4); y += 30;
+        });
+        y += 10;
+
+        // ===== Footer =====
         ctx.fillStyle = C.soft; ctx.font = '400 12px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
         ctx.fillText(isEn ? 'Generated by Zplitz' : 'สร้างโดย Zplitz', W / 2, H - 30); ctx.textAlign = 'left';
 
