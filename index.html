@@ -6225,7 +6225,7 @@
 
         // ----- ส่วนประกอบความสูงคงที่ -----
         const rowH = 38, sectionGap = 28, headH = 130;
-        const mHeadH = 50, mFootH = 44;
+        const mHeadH = 58, mFootH = 44;
         const catBlockH = catList.length ? Math.max(150, catList.slice(0, 6).length * 28 + 8) : 0;
         const factCount = (topExpense ? 1 : 0) + (topDay ? 1 : 0) + (catList.length ? 1 : 0);
         const highlightH = factCount * (60 + 10);
@@ -6238,19 +6238,27 @@
         fixedH += bottomBlockH;                          // donut/highlights
         fixedH += 60;                                    // footer
 
-        // ----- รูปขนาดคงที่เสมอ (แบบ A): H ตายตัว แถวบีบให้พอดีหน้าเดียว -----
-        // H ตั้งให้สูงพอรองรับ ~12 รายการที่ความสูงสบายตา (44px) — เป็นจำนวนที่พบบ่อย
-        // ถ้ารายการมากกว่านั้น แถวจะบีบเล็กลงเพื่อคงขนาดรูปเท่าเดิม
+        // ----- ขนาดรูป: ยืดตามรายการที่ความสูงสบายตา จนชนเพดาน แล้วค่อยบีบ -----
+        // หลักการ: แถวใช้ 44px (อ่านสบาย) → รูปสูงตามจำนวนรายการ
+        //          แต่ไม่เกินเพดาน MAX_H; ถ้าเกินค่อยบีบแถวลงให้พอดีเพดาน
         const nRows = expenses.length || 1;
-        const BASE_ROWS = 12, BASE_ROW_H = 44;
-        const H = fixedH + BASE_ROWS * BASE_ROW_H;       // ขนาดเดียวเสมอ
-        const availForRows = H - fixedH;                 // = BASE_ROWS * BASE_ROW_H
-        const exactRow = availForRows / nRows;           // ความสูงแถวที่พอดีเป๊ะ
-        // รายการ ≤12 → แถว 44px (เต็มพอดี/มีที่ว่างนิดหน่อย); >12 → บีบลงตามจำนวน
-        let mRowH = Math.min(BASE_ROW_H, exactRow);
+        const COMFORT_ROW = 44;
+        // เพดานความสูง: อิงด้านกว้างจริง (รองรับเนื้อหายาวก่อนบีบ) ~2.4 เท่าของกว้าง
+        const MAX_H = Math.round(W * 2.4);
+        const naturalH = fixedH + nRows * COMFORT_ROW;   // ความสูงถ้าใช้แถวสบายตา
+        let mRowH, H;
+        if (naturalH <= MAX_H) {
+          // ยังไม่ชนเพดาน → ใช้แถวสบายตา รูปสูงตามเนื้อหา (ไม่มีที่ว่างเกิน)
+          mRowH = COMFORT_ROW;
+          H = naturalH;
+        } else {
+          // ชนเพดาน → ตรึง H ที่เพดาน แล้วบีบแถวให้พอดี
+          H = MAX_H;
+          mRowH = (H - fixedH) / nRows;
+        }
         const matrixH = mHeadH + nRows * mRowH + mFootH;
         // สเกลฟอนต์ตามความสูงแถว
-        const rowFontScale = mRowH >= 40 ? 1 : mRowH >= 34 ? 0.94 : mRowH >= 28 ? 0.86 : mRowH >= 22 ? 0.78 : 0.68;
+        const rowFontScale = mRowH >= 40 ? 1 : mRowH >= 34 ? 0.94 : mRowH >= 28 ? 0.88 : mRowH >= 22 ? 0.8 : 0.72;
 
         const canvas = document.createElement('canvas');
         canvas.width = W * scale; canvas.height = H * scale;
@@ -6332,7 +6340,7 @@
         // -- header --
         ctx.textBaseline = 'top';
         ctx.fillStyle = C.headBg; roundRect(ctx, tX, y, tableW, mHeadH, 8); ctx.fill();
-        ctx.fillStyle = C.soft; ctx.font = '600 13px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'left';
+        ctx.fillStyle = C.soft; ctx.font = '600 14px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(isEn ? 'Item' : 'รายการ', tX + 14, y + mHeadH / 2);
         ctx.textAlign = 'right'; ctx.fillText(isEn ? 'Total' : 'รวม', colTotalX + totalColW - 14, y + mHeadH / 2);
@@ -6341,12 +6349,12 @@
         participants.forEach((p, i) => {
           const cx = personCenter(i);
           ctx.fillStyle = PCOL[i % PCOL.length];
-          ctx.beginPath(); ctx.arc(cx, y + 15, 11, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = '#ffffff'; ctx.font = '700 12px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillText((p || '?').charAt(0).toUpperCase(), cx, y + 15);
+          ctx.beginPath(); ctx.arc(cx, y + 18, 15, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#ffffff'; ctx.font = '700 15px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText((p || '?').charAt(0).toUpperCase(), cx, y + 18);
           ctx.textBaseline = 'top';
-          ctx.fillStyle = C.soft; ctx.font = '600 12px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
-          ctx.fillText(clip(ctx, p, personColW - 12), cx, y + 30);
+          ctx.fillStyle = C.text; ctx.font = '600 13px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
+          ctx.fillText(clip(ctx, p, personColW - 10), cx, y + 37);
         });
         ctx.textAlign = 'left';
         y += mHeadH;
