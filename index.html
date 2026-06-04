@@ -6348,13 +6348,22 @@
         // avatar + ชื่อแต่ละคน
         participants.forEach((p, i) => {
           const cx = personCenter(i);
-          ctx.fillStyle = PCOL[i % PCOL.length];
-          ctx.beginPath(); ctx.arc(cx, y + 18, 15, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = '#ffffff'; ctx.font = '700 15px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillText((p || '?').charAt(0).toUpperCase(), cx, y + 18);
+          const [pEmoji, pRest] = extractLeadingEmoji(p);
+          if (pEmoji) {
+            // ชื่อขึ้นต้นด้วย emoji → วาด emoji เป็น avatar (ไม่มีวงกลมพื้นหลัง) ให้ตรงกับในเว็บ
+            ctx.font = '26px "IBM Plex Sans Thai", "Plus Jakarta Sans", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(pEmoji, cx, y + 18);
+          } else {
+            ctx.fillStyle = PCOL[i % PCOL.length];
+            ctx.beginPath(); ctx.arc(cx, y + 18, 15, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#ffffff'; ctx.font = '700 15px "IBM Plex Sans Thai", "Plus Jakarta Sans", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText((p || '?').charAt(0).toUpperCase(), cx, y + 18);
+          }
           ctx.textBaseline = 'top';
-          ctx.fillStyle = C.text; ctx.font = '600 13px \"IBM Plex Sans Thai\", \"Plus Jakarta Sans\", sans-serif';
-          ctx.fillText(clip(ctx, p, personColW - 10), cx, y + 37);
+          ctx.fillStyle = C.text; ctx.font = '600 13px "IBM Plex Sans Thai", "Plus Jakarta Sans", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(clip(ctx, displayName(p), personColW - 10), cx, y + 37);
         });
         ctx.textAlign = 'left';
         y += mHeadH;
