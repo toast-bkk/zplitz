@@ -3267,6 +3267,8 @@
   function onboardingNext() {
     const track = document.getElementById('obTrack');
     if (_obIndex >= OB_SLIDES.length - 1) {
+      // ยังไม่มีทริปเลย → ห้ามปิดหน้านี้ ให้สร้างทริปก่อน
+      if (!(appState && appState.trips && appState.trips.length)) { openNewTripModal(); return; }
       finishOnboarding();
       return;
     }
@@ -3695,7 +3697,7 @@
     const write = updates => withTimeout(db.ref().update(JSON.parse(JSON.stringify(updates))), IO_TIMEOUT);
 
     // ---------- Live sync: ฟังการเปลี่ยนแปลงจากเครื่องอื่น ----------
-    let busy = 0, watched = null, watchRefs = [], latest = {}, changeCb = null, checkTimer = null;
+    let busy = 0, watched, watchRefs = [], latest = {}, changeCb = null, checkTimer = null;
     function scheduleCheck(ms) { clearTimeout(checkTimer); checkTimer = setTimeout(check, ms || 500); }
     function check() {
       if (!changeCb) return;
@@ -3708,7 +3710,7 @@
     function watchTrip(tripId) {
       if (watched === tripId) return;
       watchRefs.forEach(r => r.off()); watchRefs = []; latest = {}; watched = tripId;
-      ['trips', 'categories', 'participants/' + tripId, 'expenses/' + tripId].forEach(path => {
+      ['trips', 'categories'].concat(tripId ? ['participants/' + tripId, 'expenses/' + tripId] : []).forEach(path => {
         const ref = db.ref(path);
         ref.on('value', snap => { latest[path] = JSON.stringify(snap.val()); scheduleCheck(); });
         watchRefs.push(ref);
@@ -3872,10 +3874,13 @@
                    hasPool: t.hasPool === true || t.hasPool === 'true' };
         });
         if (trips.length === 0) {
-          const tripId = String(uniqueTs());
-          const createdAt = new Date().toISOString();
-          await write({ ['trips/' + tripId]: { name: 'ทริปแรกของฉัน', createdAt, hasPool: false } });
-          trips.push({ id: tripId, name: 'ทริปแรกของฉัน', createdAt, hasPool: false });
+          // ไม่มีทริปเลย (เช่น ลบหมดแล้ว) → คืนสถานะว่าง ให้แอปขึ้นหน้าสร้างทริป
+          try { watchTrip(null); } catch (e) { console.warn('watch failed', e); }
+          const emptyCats = Object.keys(catsObj || {}).sort().map(k => catsObj[k] || {})
+            .filter(c => c.name !== '' && c.name != null)
+            .map(c => ({ name: String(c.name).trim(), icon: c.icon || '📦' }));
+          return { trips: [], activeTripId: null, hasPool: false, participants: [], categories: emptyCats,
+                   history: [], totalSpent: 0, settlements: [], balances: {}, pool: computePoolSummary([], []) };
         }
         let activeTripId = requestedTripId ? String(requestedTripId) : null;
         if (!activeTripId || !trips.find(t => t.id === activeTripId)) activeTripId = trips[trips.length - 1].id;
@@ -4358,10 +4363,19 @@
       appState = res;
       if (res.activeTripId) {
         localStorage.setItem('trip_last_id', res.activeTripId);
+      } else if (res.trips && res.trips.length === 0) {
+        localStorage.removeItem('trip_last_id');
       }
       updateAllUI();
       hideSplashScreen();
       if (showLoading && typeof hideAppLoading === 'function') hideAppLoading();
+      // ไม่มีทริปเลย → ขึ้นหน้าสร้างทริป (รอ splash/ออนบอร์ดดิ้งครั้งแรกจบก่อน เพราะมีสไลด์สร้างทริปอยู่แล้ว)
+      if (res.trips && res.trips.length === 0) {
+        setTimeout(() => {
+          const ob = document.getElementById('onboarding');
+          if (!ob || !ob.classList.contains('show')) openTripPicker();
+        }, document.getElementById('splashScreen') ? 1000 : 0);
+      }
     });
   }
 
@@ -5528,9 +5542,7 @@
 
   function deleteTripPrompt() {
     closeModal('actionSheet');
-    if (appState.trips.length <= 1) {
-      return showToast('ต้องมีอย่างน้อย 1 ทริป');
-    }
+    if (!appState.activeTripId || !appState.trips.length) return;   // ลบได้ทุกทริป รวมถึงทริปสุดท้าย
     const trip = appState.trips.find(t => t.id === appState.activeTripId);
     const tripName = trip ? trip.name : 'ทริปนี้';
     const isEn = getLang() === 'en';
@@ -5588,10 +5600,11 @@
       restoreBtn();
       callBackend('deleteTrip', [appState.activeTripId], res => {
         appState = res;
-        localStorage.setItem('trip_last_id', res.activeTripId);
+        if (res.activeTripId) localStorage.setItem('trip_last_id', res.activeTripId);
+        else localStorage.removeItem('trip_last_id');
         updateAllUI();
         showToast(isEn ? 'Trip deleted' : 'ลบทริปเรียบร้อย', 'success');
-        // ลบเสร็จ → เปิดหน้าเลือกทริป
+        // ลบเสร็จ → เปิดหน้าเลือก/สร้างทริป (ถ้าไม่เหลือทริปเลยจะมีแค่ปุ่มสร้างทริป)
         openTripPicker();
       });
     };
