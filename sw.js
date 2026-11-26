@@ -2,12 +2,12 @@
  * Zplitz Service Worker
  * - Cache static assets (HTML, manifest, icons)
  * - Cache CDN assets (Tailwind, Lucide, Chart.js, Fonts)
- * - Network-only for Apps Script API calls (offline behavior handled in app code)
+ * - Network-only for Firebase Realtime Database calls (offline behavior handled in app code)
  *
  * Update CACHE_VERSION เมื่อ deploy ใหม่ที่มีการเปลี่ยนแปลง — browser จะ download ใหม่หมด
  */
 
-const CACHE_VERSION = 'v3.8';
+const CACHE_VERSION = 'v3.9';
 const CACHE_NAME = 'zplitz-' + CACHE_VERSION;
 
 // ไฟล์ที่จะ cache ไว้ตอน install (ครั้งแรกที่เปิดเว็บ)
@@ -57,10 +57,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // 1. Apps Script API calls — network only, ไม่ cache
+  // 1. Firebase API calls — network only, ไม่ cache
   //    (ข้อมูลต้องสด, app code มี localStorage cache ของตัวเองอยู่แล้ว)
-  if (url.hostname.includes('script.google.com') ||
-      url.hostname.includes('script.googleusercontent.com')) {
+  if (url.hostname.includes('firebaseio.com') ||
+      url.hostname.includes('firebasedatabase.app') ||
+      url.hostname.includes('googleapis.com')) {
     return; // ปล่อยให้ browser handle ตามปกติ
   }
 
@@ -79,7 +80,8 @@ self.addEventListener('fetch', (event) => {
       url.hostname.includes('unpkg.com') ||
       url.hostname.includes('cdn.jsdelivr.net') ||
       url.hostname.includes('fonts.googleapis.com') ||
-      url.hostname.includes('fonts.gstatic.com')) {
+      url.hostname.includes('fonts.gstatic.com') ||
+      url.hostname.includes('www.gstatic.com')) {   // Firebase SDK
     event.respondWith(staleWhileRevalidate(event.request));
     return;
   }

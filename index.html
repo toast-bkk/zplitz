@@ -156,6 +156,8 @@
   </script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap');
@@ -3639,11 +3641,6 @@
   // Write operations ที่ queue ได้ตอน offline
   const OFFLINE_WRITABLE = new Set(['addExpense', 'editExpense', 'deleteExpense', 'addParticipant', 'deleteParticipant', 'addTrip', 'renameTrip', 'addCategory', 'setTripPool', 'addTopupAll', 'refundPool']);
 
-  // ============ BACKEND API CONFIG ============
-  // URL ของ Apps Script Web App
-  // ถ้าจะเปลี่ยน backend ใหม่: deploy code.gs → คัดลอก URL /exec → แทนค่าด้านล่าง
-  const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxK5a2I7V_BY2RoDb4t05zHHEvEVuzwBOhl9Y_e52PI33D_7Yi-LDXWtORDuZ3tniZgwg/exec';
-
   // Helper: cache key สำหรับ getAppData ต่อ trip
   function cacheKeyFor(fnName, args) {
     if (fnName === 'getAppData') {
@@ -3653,22 +3650,417 @@
     return null;
   }
 
-  // เรียก API ผ่าน fetch — ใช้ POST ส่ง JSON body { fn, args }
-  async function fetchAPI(fnName, args) {
-    if (!SCRIPT_URL) {
-      throw new Error('SCRIPT_URL not configured');
+  // ============ BACKEND: Firebase Realtime Database ============
+  // แทน Apps Script เดิม — ชื่อฟังก์ชัน/พารามิเตอร์/รูปแบบ response เหมือน code.gs ทุกอย่าง
+  const FIREBASE_CONFIG = {
+    apiKey: 'AIzaSyBREG_3O074Yz32z5zKCz51ZyU8kuWiNnM',
+    authDomain: 'zplitz.firebaseapp.com',
+    databaseURL: 'https://zplitz-default-rtdb.asia-southeast1.firebasedatabase.app',
+    projectId: 'zplitz',
+    appId: '1:45861855841:web:1cf8b5ee8fdb1cccd30020'
+  };
+
+  const FB = (function () {
+    const POOL_PAYER = '__POOL__';
+    const IO_TIMEOUT = 10000;
+    let db = null, connected = false;
+
+    // ---------- connection ----------
+    function init() {
+      if (db) return db;
+      if (typeof firebase === 'undefined') throw new Error('Firebase SDK not loaded');
+      if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+      db = firebase.database();
+      db.ref('.info/connected').on('value', s => { connected = s.val() === true; });
+      return db;
     }
-    const res = await fetch(SCRIPT_URL, {
-      method: 'POST',
-      // ใช้ text/plain (ไม่ใช่ application/json) เพื่อกัน preflight CORS — Apps Script จะ parse JSON ได้เอง
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ fn: fnName, args: args || [] }),
-      redirect: 'follow'
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    if (data && data.error) throw new Error(data.error);
-    return data;
+    async function online() {
+      init();
+      const end = Date.now() + 5000;
+      while (!connected) {
+        if (Date.now() > end) throw new Error('เชื่อมต่อ Firebase ไม่ได้');
+        await new Promise(r => setTimeout(r, 100));
+      }
+    }
+    function withTimeout(p, ms) {
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('หมดเวลาเชื่อมต่อ Firebase')), ms);
+        p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+      });
+    }
+    const read = path => withTimeout(db.ref(path).get().then(s => s.val()), IO_TIMEOUT);
+    const write = updates => withTimeout(db.ref().update(JSON.parse(JSON.stringify(updates))), IO_TIMEOUT);
+
+    // ---------- helpers ----------
+    let lastTs = 0;   // id แบบ timestamp ที่ไม่ซ้ำกันแน่นอน (n = จำนวน id ที่จองต่อเนื่อง)
+    function uniqueTs(n) { const t = Math.max(Date.now(), lastTs + 1); lastTs = t + (n || 1) - 1; return t; }
+    const idOut = k => (/^\d+$/.test(k) ? Number(k) : k);   // id เดิมเป็นตัวเลข → คงชนิดเดิมไว้
+    const byKey = (a, b) => (Number(a) || 0) - (Number(b) || 0) || (a < b ? -1 : a > b ? 1 : 0);
+    function safeParse(s) {
+      if (s && typeof s === 'object') return s;
+      try { return JSON.parse(s || '{}'); } catch (e) { return {}; }
+    }
+    function resolveDate(dateStr, base) {
+      const b = base && !isNaN(new Date(base)) ? new Date(base) : new Date();
+      if (dateStr && typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
+        const p = dateStr.split('-');
+        return new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10),
+                        b.getHours(), b.getMinutes(), b.getSeconds());
+      }
+      return b;
+    }
+    function computeBaseAmount(amount, currency, rate) {
+      amount = parseFloat(amount) || 0;
+      rate = parseFloat(rate) || 1;
+      if (currency === 'THB') return amount;
+      if (['VND', 'KRW'].indexOf(currency) >= 0) return amount / rate;
+      return amount * rate;
+    }
+    function expenseFields(data, category) {
+      return {
+        item: String(data.item || ''),
+        category: String(category == null ? '' : category),
+        payer: String(data.payer == null ? '' : data.payer),
+        amount: parseFloat(data.amount) || 0,
+        currency: data.currency || 'THB',
+        exchangeRate: parseFloat(data.exchangeRate) || 1,
+        baseAmount: computeBaseAmount(data.amount, data.currency, data.exchangeRate),
+        splitDetails: JSON.stringify(data.splitDetails || {}),
+        note: data.note || '',
+        type: data.type || 'Expense'
+      };
+    }
+    function toRows(obj) {
+      return Object.keys(obj || {}).map(k => {
+        const e = obj[k] || {};
+        return {
+          id: idOut(k), date: e.date || null,
+          item: e.item == null ? '' : String(e.item),
+          category: e.category == null ? '' : String(e.category),
+          payer: e.payer == null ? '' : String(e.payer),
+          amount: e.amount, currency: e.currency, exchangeRate: e.exchangeRate,
+          baseAmount: e.baseAmount, splitDetails: safeParse(e.splitDetails),
+          note: e.note || '', type: e.type || 'Expense'
+        };
+      });
+    }
+    async function participantsOf(tripId) {
+      const obj = await read('participants/' + tripId);
+      return Object.keys(obj || {}).sort(byKey)
+        .map(k => String(obj[k] == null ? '' : obj[k]).trim()).filter(n => n);
+    }
+
+    // ---------- คำนวณ (พอร์ตจาก code.gs ตรงๆ) ----------
+    function computeBalances(friends, rows) {
+      const balances = {};
+      friends.forEach(name => balances[name] = {
+        paid: 0, share: 0, repayPaid: 0, repayReceived: 0,
+        poolContributed: 0, poolShare: 0, net: 0
+      });
+      rows.forEach(row => {
+        const payer = row.payer;
+        const baseAmount = parseFloat(row.baseAmount) || 0;
+        const splitDetails = row.splitDetails;
+        const type = row.type || 'Expense';
+        if (baseAmount <= 0) return;
+        if (type === 'Repayment') {
+          const recipient = Object.keys(splitDetails)[0];
+          if (balances[payer]) { balances[payer].repayPaid += baseAmount; balances[payer].net += baseAmount; }
+          if (balances[recipient]) { balances[recipient].repayReceived += baseAmount; balances[recipient].net -= baseAmount; }
+        } else if (type === 'Topup') {
+          if (balances[payer]) balances[payer].poolContributed += baseAmount;
+        } else if (type === 'Refund') {
+          if (balances[payer]) balances[payer].poolContributed -= baseAmount;
+        } else if (payer === POOL_PAYER) {
+          for (const name in splitDetails) {
+            const share = parseFloat(splitDetails[name]) || 0;
+            if (balances[name]) balances[name].poolShare += share;
+          }
+        } else {
+          if (balances[payer]) balances[payer].paid += baseAmount;
+          for (const name in splitDetails) {
+            const share = parseFloat(splitDetails[name]) || 0;
+            if (balances[name]) balances[name].share += share;
+          }
+        }
+      });
+      friends.forEach(name => {
+        const b = balances[name];
+        b.net = (b.paid - b.share) + (b.net || 0);
+      });
+      return balances;
+    }
+    function computePoolSummary(rows, friends) {
+      let totalContributed = 0, totalUsed = 0, totalRefunded = 0;
+      const contributors = {};
+      friends.forEach(n => contributors[n] = 0);
+      rows.forEach(row => {
+        const payer = row.payer;
+        const baseAmount = parseFloat(row.baseAmount) || 0;
+        const type = row.type || 'Expense';
+        if (baseAmount <= 0) return;
+        if (type === 'Topup') {
+          totalContributed += baseAmount;
+          if (contributors.hasOwnProperty(payer)) contributors[payer] += baseAmount;
+        } else if (type === 'Refund') {
+          totalRefunded += baseAmount;
+          if (contributors.hasOwnProperty(payer)) contributors[payer] -= baseAmount;
+        } else if (payer === POOL_PAYER && type !== 'Repayment') {
+          totalUsed += baseAmount;
+        }
+      });
+      return {
+        contributed: totalContributed, used: totalUsed, refunded: totalRefunded,
+        remaining: totalContributed - totalUsed - totalRefunded, contributors
+      };
+    }
+    function computeSettlements(balances) {
+      const debtors = [], creditors = [];
+      for (const name in balances) {
+        const v = balances[name].net;
+        if (v < -0.5) debtors.push({ name, amount: Math.abs(v) });
+        else if (v > 0.5) creditors.push({ name, amount: v });
+      }
+      debtors.sort((a, b) => b.amount - a.amount);
+      creditors.sort((a, b) => b.amount - a.amount);
+      const settlements = [];
+      let d = 0, c = 0;
+      while (d < debtors.length && c < creditors.length) {
+        const transfer = Math.min(debtors[d].amount, creditors[c].amount);
+        settlements.push({ from: debtors[d].name, to: creditors[c].name, amount: Math.round(transfer * 100) / 100 });
+        debtors[d].amount -= transfer;
+        creditors[c].amount -= transfer;
+        if (debtors[d].amount < 0.5) d++;
+        if (creditors[c].amount < 0.5) c++;
+      }
+      return settlements;
+    }
+
+    // ---------- READ ----------
+    async function getAppData(requestedTripId) {
+      try {
+        await online();
+        const [tripsObj, catsObj] = await Promise.all([read('trips'), read('categories')]);
+        const trips = Object.keys(tripsObj || {}).sort(byKey).map(id => {
+          const t = tripsObj[id] || {};
+          return { id: String(id), name: String(t.name == null ? '' : t.name), createdAt: t.createdAt || null,
+                   hasPool: t.hasPool === true || t.hasPool === 'true' };
+        });
+        if (trips.length === 0) {
+          const tripId = String(uniqueTs());
+          const createdAt = new Date().toISOString();
+          await write({ ['trips/' + tripId]: { name: 'ทริปแรกของฉัน', createdAt, hasPool: false } });
+          trips.push({ id: tripId, name: 'ทริปแรกของฉัน', createdAt, hasPool: false });
+        }
+        let activeTripId = requestedTripId ? String(requestedTripId) : null;
+        if (!activeTripId || !trips.find(t => t.id === activeTripId)) activeTripId = trips[trips.length - 1].id;
+        const activeTrip = trips.find(t => t.id === activeTripId);
+        const hasPool = activeTrip ? activeTrip.hasPool : false;
+
+        const [participants, expObj] = await Promise.all([
+          participantsOf(activeTripId), read('expenses/' + activeTripId)
+        ]);
+        const categories = Object.keys(catsObj || {}).sort().map(k => catsObj[k] || {})
+          .filter(c => c.name !== '' && c.name != null)
+          .map(c => ({ name: String(c.name).trim(), icon: c.icon || '📦' }));
+
+        const rows = toRows(expObj);
+        const history = rows.map(r => ({
+          id: r.id,
+          date: r.date ? new Date(r.date).toISOString() : new Date().toISOString(),
+          item: r.item, category: r.category, payer: r.payer,
+          amount: r.amount, currency: r.currency, exchangeRate: r.exchangeRate, baseAmount: r.baseAmount,
+          details: r.splitDetails, note: r.note, type: r.type
+        })).sort((a, b) => new Date(b.date) - new Date(a.date));
+
+        const totalSpent = rows.reduce((sum, r) => {
+          const t = r.type || 'Expense';
+          if (t === 'Repayment' || t === 'Topup' || t === 'Refund') return sum;
+          return sum + (parseFloat(r.baseAmount) || 0);
+        }, 0);
+        const balances = computeBalances(participants, rows);
+        const pool = computePoolSummary(rows, participants);
+        const settlements = computeSettlements(balances);
+        return { trips, activeTripId, hasPool, participants, categories, history, totalSpent, settlements, balances, pool };
+      } catch (err) {
+        return { error: 'เกิดข้อผิดพลาด: ' + (err && err.message || err) };
+      }
+    }
+
+    // ---------- WRITE: Expense ----------
+    async function addExpense(data) {
+      await online();
+      const clientTemp = data._tempId;
+      // กำหนด id จาก tempId → ถ้า sync ซ้ำ (retry จาก offline queue) จะเขียนทับ id เดิม ไม่เกิดรายการซ้ำ
+      if (!data._tempId) data._tempId = 'off_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+      const id = String(data._tempId).replace(/^off_/, '').replace(/[.#$\[\]\/]/g, '_');
+      const category = data.type === 'Repayment' ? 'Repayment' : data.category;
+      const rec = expenseFields(data, category);
+      rec.date = resolveDate(data.date, null).toISOString();
+      await write({ ['expenses/' + data.tripId + '/' + id]: rec });
+      const res = await getAppData(data.tripId);
+      res._newId = String(id);
+      if (clientTemp) res._tempId = String(clientTemp);
+      return res;
+    }
+    async function editExpense(data) {
+      await online();
+      const path = 'expenses/' + data.tripId + '/' + data.id;
+      const old = await read(path);
+      if (old) {
+        const category = data.type === 'Repayment' ? 'Repayment' : data.category;
+        const f = expenseFields(data, category);
+        const updates = {};
+        Object.keys(f).forEach(k => updates[path + '/' + k] = f[k]);
+        if (data.date && typeof data.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(data.date)) {
+          updates[path + '/date'] = resolveDate(data.date, old.date).toISOString();
+        }
+        await write(updates);
+      }
+      return getAppData(data.tripId);
+    }
+    async function deleteExpense(id, tripId) {
+      await online();
+      await write({ ['expenses/' + tripId + '/' + id]: null });
+      return getAppData(tripId);
+    }
+    async function addTopupAll(tripId, perPerson, currency, exchangeRate, note) {
+      await online();
+      const participants = await participantsOf(tripId);
+      const per = parseFloat(perPerson) || 0;
+      if (per <= 0 || participants.length === 0) return getAppData(tripId);
+      const baseAmount = computeBaseAmount(per, currency || 'THB', exchangeRate || 1);
+      const baseTime = uniqueTs(participants.length);
+      const date = new Date().toISOString();
+      const updates = {};
+      participants.forEach((name, idx) => {
+        updates['expenses/' + tripId + '/' + (baseTime + idx)] = {
+          date, item: 'เติมเงินกองกลาง', category: 'Topup', payer: name, amount: per,
+          currency: currency || 'THB', exchangeRate: parseFloat(exchangeRate) || 1, baseAmount,
+          splitDetails: '{}', note: note || '', type: 'Topup'
+        };
+      });
+      await write(updates);
+      return getAppData(tripId);
+    }
+    async function refundPool(tripId) {
+      await online();
+      const participants = await participantsOf(tripId);
+      if (participants.length === 0) return getAppData(tripId);
+      const rows = toRows(await read('expenses/' + tripId));
+      const remaining = computePoolSummary(rows, participants).remaining;
+      if (remaining <= 0.5) {
+        return Object.assign({}, await getAppData(tripId), { refundMessage: 'ไม่มีเงินเหลือในกองให้คืน' });
+      }
+      const perPerson = remaining / participants.length;
+      const baseTime = uniqueTs(participants.length);
+      const date = new Date().toISOString();
+      const updates = {};
+      participants.forEach((name, idx) => {
+        updates['expenses/' + tripId + '/' + (baseTime + idx)] = {
+          date, item: 'คืนเงินกองคงเหลือ', category: 'Refund', payer: name, amount: perPerson,
+          currency: 'THB', exchangeRate: 1, baseAmount: perPerson,
+          splitDetails: '{}', note: '', type: 'Refund'
+        };
+      });
+      await write(updates);
+      return getAppData(tripId);
+    }
+
+    // ---------- WRITE: Trip ----------
+    async function addTrip(tripName) {
+      await online();
+      const tripId = String(uniqueTs());
+      const name = String(tripName == null ? '' : tripName).trim();
+      await write({ ['trips/' + tripId]: { name, createdAt: new Date().toISOString(), hasPool: false } });
+      const res = await getAppData(tripId);
+      res._newId = tripId;
+      return res;
+    }
+    async function setTripPool(tripId, enabled) {
+      await online();
+      if (await read('trips/' + tripId)) {
+        await write({ ['trips/' + tripId + '/hasPool']: enabled === true || enabled === 'true' });
+      }
+      return getAppData(tripId);
+    }
+    async function renameTrip(tripId, newName) {
+      await online();
+      if (await read('trips/' + tripId)) {
+        await write({ ['trips/' + tripId + '/name']: String(newName == null ? '' : newName).trim() });
+      }
+      return getAppData(tripId);
+    }
+    async function deleteTrip(tripId) {
+      await online();
+      await write({ ['trips/' + tripId]: null, ['participants/' + tripId]: null, ['expenses/' + tripId]: null });
+      return getAppData(null);
+    }
+
+    // ---------- WRITE: Participant ----------
+    async function addParticipant(name, tripId) {
+      await online();
+      const nm = String(name == null ? '' : name).trim();
+      if (!nm) return getAppData(tripId);
+      const obj = (await read('participants/' + tripId)) || {};
+      const exists = Object.keys(obj).some(k => String(obj[k] == null ? '' : obj[k]).trim() === nm);
+      if (!exists) {
+        let key = String(uniqueTs());
+        while (obj[key] !== undefined) key = String(Number(key) + 1);
+        await write({ ['participants/' + tripId + '/' + key]: nm });
+      }
+      return getAppData(tripId);
+    }
+    async function deleteParticipant(name, tripId) {
+      await online();
+      const nm = String(name == null ? '' : name).trim();
+      const obj = (await read('participants/' + tripId)) || {};
+      const keys = Object.keys(obj).sort(byKey).reverse();
+      const hit = keys.find(k => String(obj[k] == null ? '' : obj[k]).trim() === nm);
+      if (hit !== undefined) await write({ ['participants/' + tripId + '/' + hit]: null });
+      return getAppData(tripId);
+    }
+
+    // ---------- WRITE: Category ----------
+    async function addCategory(name, icon, tripId) {
+      await online();
+      const nm = String(name == null ? '' : name).trim();
+      if (!nm) return getAppData(tripId);
+      const obj = (await read('categories')) || {};
+      const exists = Object.keys(obj).some(k => String((obj[k] || {}).name == null ? '' : obj[k].name).trim() === nm);
+      if (!exists) {
+        let key = 'c' + Date.now();
+        while (obj[key] !== undefined) key += 'x';
+        await write({ ['categories/' + key]: { name: nm, icon: icon || '📦' } });
+      }
+      return getAppData(tripId);
+    }
+    async function deleteCategory(name, tripId) {
+      await online();
+      const nm = String(name == null ? '' : name).trim();
+      const obj = (await read('categories')) || {};
+      const hit = Object.keys(obj).sort().reverse()
+        .find(k => String((obj[k] || {}).name == null ? '' : obj[k].name).trim() === nm);
+      if (hit !== undefined) await write({ ['categories/' + hit]: null });
+      return getAppData(tripId);
+    }
+
+    // ---------- dispatcher (whitelist เหมือน ALLOWED_FUNCTIONS เดิม) ----------
+    const API = { getAppData, addExpense, editExpense, deleteExpense, addTopupAll, refundPool,
+                  addTrip, renameTrip, deleteTrip, setTripPool, addParticipant, deleteParticipant,
+                  addCategory, deleteCategory };
+    async function call(fn, args) {
+      if (!API[fn]) throw new Error('Function not allowed: ' + fn);
+      const res = await API[fn].apply(null, args || []);
+      if (res && res.error) throw new Error(res.error);
+      return res;
+    }
+    return { call };
+  })();
+
+  // เรียก backend — ใช้ชื่อ/รูปแบบเดิม (ส่วนอื่นของแอปไม่ต้องแก้)
+  async function fetchAPI(fnName, args) {
+    return FB.call(fnName, args || []);
   }
 
   // สร้าง temp id เดียวที่ใช้ร่วมกันระหว่าง queue arg, optimistic record, และ backend matching
@@ -7431,7 +7823,7 @@
   async function syncOfflineQueue() {
     if (_syncing) return;
     if (!isOnline()) return;
-    if (!SCRIPT_URL) return;
+    if (!FIREBASE_CONFIG.databaseURL) return;
     let queue = getOfflineQueue();
     if (queue.length === 0) return;
 
