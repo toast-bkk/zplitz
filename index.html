@@ -158,6 +158,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap');
@@ -877,6 +878,7 @@
       padding-bottom: 16px;
     }
     #inputModal .modal-box { margin: auto 0; }
+    #trashChoiceModal { z-index: 92; } /* เหนือ inputModal (90) และออนบอร์ดดิ้ง (80) */
     /* เมื่อคีย์บอร์ดเปิด → ดัน modal ลงไปชิดล่าง เว้นจากคีย์บอร์ดแค่ 12px */
     body.keyboard-open #inputModal {
       align-items: flex-end;
@@ -2084,6 +2086,16 @@
   </div>
 </div>
 
+<!-- ===== Choice Modal (กู้คืนทริป / ยืนยันลบถาวร) ===== -->
+<div id="trashChoiceModal" class="fixed inset-0 modal-overlay z-50 hidden items-center justify-center p-4 opacity-0 transition-opacity">
+  <div class="rounded-2xl w-full max-w-sm p-5 shadow-strong modal-box">
+    <div id="trashChoiceIcon" class="text-4xl text-center mb-2"></div>
+    <h3 id="trashChoiceTitle" class="text-lg font-bold text-center mb-2 text-main"></h3>
+    <p id="trashChoiceMsg" class="text-soft text-center text-sm mb-5"></p>
+    <div id="trashChoiceBtns" class="space-y-2"></div>
+  </div>
+</div>
+
 <!-- ===== Dead-letter (รายการ sync ไม่สำเร็จ) Modal ===== -->
 <div id="deadLetterModal" class="fixed inset-0 modal-overlay z-50 hidden items-center justify-center p-4 opacity-0 transition-opacity">
   <div class="rounded-2xl w-full max-w-sm p-5 shadow-strong modal-box">
@@ -2508,6 +2520,11 @@
         <span class="font-medium text-main flex-1 text-left" data-i18n="rename_trip">เปลี่ยนชื่อทริป</span>
         <i data-lucide="chevron-right" class="h-4 w-4 text-muted"></i>
       </button>
+      <button onclick="openTripPicker()" class="w-full flex items-center gap-3 p-2.5 rounded-lg surface-2 text-sm">
+        <i data-lucide="archive-restore" class="h-4 w-4 text-soft shrink-0"></i>
+        <span class="font-medium text-main flex-1 text-left" data-i18n="trash_trips">ทริปที่ลบแล้ว (กู้คืนได้ 7 วัน)</span>
+        <i data-lucide="chevron-right" class="h-4 w-4 text-muted"></i>
+      </button>
       <button onclick="deleteTripPrompt()" class="w-full flex items-center gap-3 p-2.5 rounded-lg danger-bg-soft text-sm">
         <i data-lucide="trash-2" class="h-4 w-4 shrink-0"></i>
         <span class="font-medium flex-1 text-left" data-i18n="delete_trip">ลบทริปนี้</span>
@@ -2836,7 +2853,8 @@
       save: 'บันทึก',
       rename_trip: 'เปลี่ยนชื่อทริป',
       delete_trip: 'ลบทริปนี้',
-      delete_trip_msg: 'รายการทั้งหมดในทริปนี้จะหายไปด้วย ไม่สามารถกู้คืนได้',
+      trash_trips: 'ทริปที่ลบแล้ว (กู้คืนได้ 7 วัน)',
+      delete_trip_msg: 'ทริปจะถูกเก็บไว้ 7 วัน กู้คืนได้ก่อนถูกลบถาวร',
       // Offline
       offline_banner: 'ออฟไลน์ — บันทึกจะ sync เมื่อกลับมาออนไลน์',
       syncing: 'กำลัง sync...',
@@ -3014,7 +3032,8 @@
       save: 'Save',
       rename_trip: 'Rename trip',
       delete_trip: 'Delete this trip',
-      delete_trip_msg: 'All items in this trip will be deleted. This cannot be undone.',
+      trash_trips: 'Deleted trips (restore within 7 days)',
+      delete_trip_msg: 'The trip is kept for 7 days and can be restored before it is deleted for good.',
       offline_banner: 'Offline — saves will sync when back online',
       syncing: 'Syncing...',
       synced: 'Synced',
@@ -3148,10 +3167,25 @@
         <span class="font-medium text-main flex-1 truncate">${escapeHtml(String(tr.name))}</span>
         ${String(tr.id) === String(activeId) ? '<i data-lucide="check" class="h-4 w-4 accent-text shrink-0"></i>' : ''}
       </button>`).join('');
+    const isEnP = getLang() === 'en';
+    const trash = (appState && appState.trash) || [];
+    const trashRows = trash.map(x => `
+      <div class="flex items-center gap-2 p-2.5 rounded-xl surface-2 border border-themed">
+        <div class="flex-1 min-w-0 text-left">
+          <div class="font-medium text-main truncate text-sm">${escapeHtml(String(x.name))}</div>
+          <div class="text-[11px] text-soft">${x.expenseCount} ${isEnP ? 'items' : 'รายการ'} · ${isEnP ? x.daysLeft + ' days left' : 'เหลือ ' + x.daysLeft + ' วัน'}</div>
+        </div>
+        <button onclick="restoreTrashedTrip('${x.id}')" class="px-3 py-1.5 rounded-lg text-xs font-semibold accent-bg-soft text-main shrink-0">${isEnP ? 'Restore' : 'กู้คืน'}</button>
+        <button onclick="purgeTrashedTrip('${x.id}')" aria-label="${isEnP ? 'Delete permanently' : 'ลบถาวร'}" class="p-2 rounded-lg danger-bg-soft shrink-0"><i data-lucide="trash-2" class="h-3.5 w-3.5"></i></button>
+      </div>`).join('');
     box.innerHTML = rows + `
       <button onclick="obCreateTrip()" class="w-full flex items-center justify-center gap-2 p-3 rounded-xl accent-bg-soft border border-themed border-dashed font-semibold text-main">
         <i data-lucide="plus-circle" class="h-4 w-4 accent-text"></i> ${t('ob_trip_new')}
-      </button>`;
+      </button>` + (trash.length ? `
+      <div class="pt-3 mt-1 border-t border-themed space-y-2">
+        <div class="text-[11px] font-semibold text-soft uppercase tracking-wider text-left">${isEnP ? 'Deleted trips · kept 7 days' : 'ทริปที่ลบแล้ว · เก็บไว้ 7 วัน'}</div>
+        ${trashRows}
+      </div>` : '');
     if (window.lucide) lucide.createIcons();
   }
 
@@ -3665,7 +3699,8 @@
   const FB = (function () {
     const POOL_PAYER = '__POOL__';
     const IO_TIMEOUT = 10000;
-    let db = null, connected = false;
+    const TRASH_DAYS = 7, DAY_MS = 86400000;   // ทริปที่ลบเก็บไว้กู้คืนได้ 7 วัน
+    let db = null, connected = false, authReady = Promise.resolve();
 
     // ---------- connection ----------
     function init() {
@@ -3674,6 +3709,11 @@
       if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
       db = firebase.database();
       db.ref('.info/connected').on('value', s => { connected = s.val() === true; });
+      // ล็อกอินแบบ Anonymous เงียบๆ (ไม่ต้องกรอกอะไร) — ใช้คู่กับ rules ที่ต้อง auth != null
+      // ถ้ายังไม่ได้เปิด Anonymous ใน Console จะข้ามไป แอปยังทำงานได้ตราบที่ rules ยังเปิดอยู่
+      if (typeof firebase.auth === 'function') {
+        authReady = firebase.auth().signInAnonymously().catch(e => console.warn('anonymous sign-in skipped:', e && e.code));
+      }
       return db;
     }
     async function online() {
@@ -3683,6 +3723,7 @@
         if (Date.now() > end) throw new Error('เชื่อมต่อ Firebase ไม่ได้');
         await new Promise(r => setTimeout(r, 100));
       }
+      await Promise.race([authReady, new Promise(r => setTimeout(r, 4000))]);   // รอล็อกอินเสร็จก่อนอ่าน/เขียน
     }
     function withTimeout(p, ms) {
       return new Promise((resolve, reject) => {
@@ -3867,7 +3908,20 @@
     async function getAppData(requestedTripId) {
       try {
         await online();
-        const [tripsObj, catsObj] = await Promise.all([read('trips'), read('categories')]);
+        const [tripsObj, catsObj, trashObj] = await Promise.all([read('trips'), read('categories'), read('trash')]);
+        // ทริปที่ลบ: เก็บไว้ 7 วัน เกินแล้วลบถาวรอัตโนมัติ
+        const now = Date.now(), trash = [], expired = [];
+        Object.keys(trashObj || {}).forEach(id => {
+          const tr = trashObj[id] || {}, at = Number(tr.deletedAt) || 0;
+          if (at && now - at > TRASH_DAYS * DAY_MS) { expired.push(id); return; }
+          trash.push({ id, name: String(tr.name == null ? '' : tr.name), deletedAt: at, expenseCount: tr.expenseCount || 0,
+                       daysLeft: at ? Math.max(0, Math.ceil((at + TRASH_DAYS * DAY_MS - now) / DAY_MS)) : TRASH_DAYS });
+        });
+        trash.sort((a, b) => b.deletedAt - a.deletedAt);
+        if (expired.length) {
+          const u = {}; expired.forEach(id => { u['trash/' + id] = null; u['trashData/' + id] = null; });
+          write(u).catch(e => console.warn('purge trash failed', e));
+        }
         const trips = Object.keys(tripsObj || {}).sort(byKey).map(id => {
           const t = tripsObj[id] || {};
           return { id: String(id), name: String(t.name == null ? '' : t.name), createdAt: t.createdAt || null,
@@ -3880,7 +3934,7 @@
             .filter(c => c.name !== '' && c.name != null)
             .map(c => ({ name: String(c.name).trim(), icon: c.icon || '📦' }));
           return { trips: [], activeTripId: null, hasPool: false, participants: [], categories: emptyCats,
-                   history: [], totalSpent: 0, settlements: [], balances: {}, pool: computePoolSummary([], []) };
+                   history: [], totalSpent: 0, settlements: [], balances: {}, pool: computePoolSummary([], []), trash };
         }
         let activeTripId = requestedTripId ? String(requestedTripId) : null;
         if (!activeTripId || !trips.find(t => t.id === activeTripId)) activeTripId = trips[trips.length - 1].id;
@@ -3912,7 +3966,7 @@
         const pool = computePoolSummary(rows, participants);
         const settlements = computeSettlements(balances);
         try { watchTrip(activeTripId); } catch (e) { console.warn('watch failed', e); }
-        return { trips, activeTripId, hasPool, participants, categories, history, totalSpent, settlements, balances, pool };
+        return { trips, activeTripId, hasPool, participants, categories, history, totalSpent, settlements, balances, pool, trash };
       } catch (err) {
         return { error: 'เกิดข้อผิดพลาด: ' + (err && err.message || err) };
       }
@@ -3999,11 +4053,14 @@
     }
 
     // ---------- WRITE: Trip ----------
-    async function addTrip(tripName, idem) {
+    async function addTrip(tripName, idem, discardTrashIds) {
       await online();
       const tripId = idem ? String(idem) : String(uniqueTs());
       const name = String(tripName == null ? '' : tripName).trim();
-      await write({ ['trips/' + tripId]: { name, createdAt: new Date().toISOString(), hasPool: false } });
+      const updates = { ['trips/' + tripId]: { name, createdAt: new Date().toISOString(), hasPool: false } };
+      // สร้างทริปใหม่แทนทริปเดิมในถังขยะ → ลบของเก่าถาวรไปพร้อมกัน
+      if (Array.isArray(discardTrashIds)) discardTrashIds.forEach(id => { updates['trash/' + id] = null; updates['trashData/' + id] = null; });
+      await write(updates);
       const res = await getAppData(tripId);
       res._newId = tripId;
       return res;
@@ -4022,10 +4079,35 @@
       }
       return getAppData(tripId);
     }
+    // ลบแบบเก็บไว้ในถังขยะ 7 วัน: ย้ายข้อมูลไป trashData/{id} + index เล็กๆ ที่ trash/{id}
     async function deleteTrip(tripId) {
       await online();
-      await write({ ['trips/' + tripId]: null, ['participants/' + tripId]: null, ['expenses/' + tripId]: null });
+      const [trip, parts, exps] = await Promise.all([
+        read('trips/' + tripId), read('participants/' + tripId), read('expenses/' + tripId)]);
+      const updates = { ['trips/' + tripId]: null, ['participants/' + tripId]: null, ['expenses/' + tripId]: null };
+      if (trip) {
+        updates['trash/' + tripId] = { name: String(trip.name == null ? '' : trip.name), deletedAt: Date.now(),
+                                       expenseCount: Object.keys(exps || {}).length, hasPool: trip.hasPool === true };
+        updates['trashData/' + tripId] = { trip, participants: parts || null, expenses: exps || null };
+      }
+      await write(updates);
       return getAppData(null);
+    }
+    async function restoreTrip(tripId) {
+      await online();
+      const data = await read('trashData/' + tripId);
+      if (data && data.trip) {
+        await write({
+          ['trips/' + tripId]: data.trip, ['participants/' + tripId]: data.participants || null,
+          ['expenses/' + tripId]: data.expenses || null, ['trash/' + tripId]: null, ['trashData/' + tripId]: null });
+        return getAppData(tripId);
+      }
+      return getAppData(null);
+    }
+    async function purgeTrash(trashId, activeTripId) {
+      await online();
+      await write({ ['trash/' + trashId]: null, ['trashData/' + trashId]: null });
+      return getAppData(activeTripId);
     }
 
     // ---------- WRITE: Participant ----------
@@ -4079,7 +4161,7 @@
     // ---------- dispatcher (whitelist เหมือน ALLOWED_FUNCTIONS เดิม) ----------
     const API = { getAppData, addExpense, editExpense, deleteExpense, addTopupAll, refundPool,
                   addTrip, renameTrip, deleteTrip, setTripPool, addParticipant, deleteParticipant,
-                  addCategory, deleteCategory };
+                  addCategory, deleteCategory, restoreTrip, purgeTrash };
     // ตำแหน่ง arg ที่ใช้เก็บ idempotency key — stamp ลง array เดิม (ตัวเดียวกับที่แอป queue) เพื่อให้ retry ใช้ id เดิม
     const IDEM_POS = { addTopupAll: 5, refundPool: 1, addTrip: 1 };
     async function call(fn, args) {
@@ -5384,6 +5466,78 @@
   }
 
   // ============ MODALS ============
+  // ============ ทริปที่ลบ (ถังขยะ 7 วัน) ============
+  // dialog เลือกได้หลายปุ่ม (ลอยเหนือออนบอร์ดดิ้งได้)
+  function askChoice(o) {
+    document.getElementById('trashChoiceIcon').textContent = o.icon || '';
+    document.getElementById('trashChoiceTitle').textContent = o.title || '';
+    document.getElementById('trashChoiceMsg').textContent = o.msg || '';
+    const box = document.getElementById('trashChoiceBtns');
+    box.innerHTML = '';
+    (o.buttons || []).forEach(b => {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.textContent = b.label;
+      el.className = 'w-full py-2.5 rounded-xl font-medium ' +
+        (b.kind === 'primary' ? 'btn-primary' : b.kind === 'danger' ? 'text-white' : 'surface-2 text-soft');
+      if (b.kind === 'danger') el.style.background = 'var(--danger)';
+      el.onclick = () => { closeModal('trashChoiceModal'); if (b.onClick) b.onClick(); };
+      box.appendChild(el);
+    });
+    toggleModal('trashChoiceModal', true);
+  }
+
+  function restoreTrashedTrip(id) {
+    const isEn = getLang() === 'en';
+    callBackend('restoreTrip', [id], res => {
+      appState = res;
+      if (res.activeTripId) localStorage.setItem('trip_last_id', res.activeTripId);
+      updateAllUI();
+      showToast(isEn ? 'Trip restored' : 'กู้คืนทริปแล้ว', 'success');
+      const ob = document.getElementById('onboarding');
+      if (ob && ob.classList.contains('show')) finishOnboarding();   // กลับเข้าแอปพร้อมทริปที่กู้คืน
+    });
+  }
+
+  function purgeTrashedTrip(id) {
+    const isEn = getLang() === 'en';
+    const item = ((appState && appState.trash) || []).find(x => String(x.id) === String(id));
+    askChoice({
+      icon: '🗑️',
+      title: isEn ? 'Delete permanently?' : 'ลบถาวร?',
+      msg: (item ? '"' + item.name + '" ' : '') + (isEn ? 'will be gone for good and cannot be restored.' : 'จะหายไปถาวรและกู้คืนไม่ได้'),
+      buttons: [
+        { label: isEn ? 'Delete permanently' : 'ลบถาวร', kind: 'danger', onClick: () => {
+          callBackend('purgeTrash', [id, appState.activeTripId], res => {
+            appState = res;
+            updateAllUI();
+            if (typeof renderObTripPicker === 'function') renderObTripPicker();
+            showToast(isEn ? 'Deleted permanently' : 'ลบถาวรแล้ว', 'success');
+          });
+        } },
+        { label: isEn ? 'Cancel' : 'ยกเลิก', kind: 'plain' }
+      ]
+    });
+  }
+
+  // สร้างทริปชื่อเดียวกับที่เพิ่งลบ → ให้เลือก กู้คืนของเดิม หรือ สร้างใหม่ (ลบของเก่าถาวร)
+  function askTrashMatch(val, matches) {
+    const isEn = getLang() === 'en';
+    const latest = matches.slice().sort((a, b) => b.deletedAt - a.deletedAt)[0];
+    askChoice({
+      icon: '♻️',
+      title: isEn ? 'A deleted trip has this name' : 'มีทริปชื่อนี้ที่เพิ่งลบไป',
+      msg: '"' + latest.name + '" · ' + latest.expenseCount + (isEn ? ' items · ' : ' รายการ · ') +
+           (isEn ? latest.daysLeft + ' days left to restore' : 'กู้คืนได้อีก ' + latest.daysLeft + ' วัน'),
+      buttons: [
+        { label: isEn ? 'Restore the old trip' : 'กู้คืนทริปเดิม', kind: 'primary', onClick: () => restoreTrashedTrip(latest.id) },
+        { label: isEn ? 'Create new (delete old for good)' : 'สร้างใหม่ (ลบอันเก่าถาวร)', kind: 'danger',
+          onClick: () => createTripNow(val, matches.map(m => m.id)) },
+        { label: isEn ? 'Cancel' : 'ยกเลิก', kind: 'plain' }
+      ]
+    });
+  }
+
   function openNewTripModal() {
     document.getElementById('inputModalTitle').innerText = 'สร้างทริปใหม่';
     document.getElementById('inputModalBody').innerHTML =
@@ -5400,25 +5554,32 @@
         return;
       }
       closeModal('inputModal');
-      const fromOnboarding = (() => {
-        const ob = document.getElementById('onboarding');
-        return ob && ob.classList.contains('show');
-      })();
-      // โชว์หน้าโหลดระหว่างรอ backend (ทั้งจากออนบอร์ดดิ้งและหน้าตั้งค่า)
-      showAppLoading(getLang() === 'en' ? 'Creating trip…' : 'กำลังเตรียมทริป...');
-      callBackend('addTrip', [val], res => {
-        appState = res;
-        updateAllUI();
-        if (fromOnboarding) {
-          // จบออนบอร์ดดิ้ง + ปิดหน้าโหลด แล้วเข้าหน้าแอปทันที
-          finishOnboarding();
-          hideAppLoading();
-        } else {
-          hideAppLoading();
-          showToast('สร้างทริปสำเร็จ', 'success');
-        }
-      });
+      // ชื่อตรงกับทริปที่ลบไว้ในถังขยะ → ถามว่าจะกู้คืนหรือสร้างใหม่
+      const trashMatch = ((appState && appState.trash) || []).filter(x => normTrip(x.name) === normTrip(val));
+      if (trashMatch.length) { askTrashMatch(val, trashMatch); return; }
+      createTripNow(val, null);
     };
+  }
+
+  function createTripNow(val, discardTrashIds) {
+    const fromOnboarding = (() => {
+      const ob = document.getElementById('onboarding');
+      return ob && ob.classList.contains('show');
+    })();
+    // โชว์หน้าโหลดระหว่างรอ backend (ทั้งจากออนบอร์ดดิ้งและหน้าตั้งค่า)
+    showAppLoading(getLang() === 'en' ? 'Creating trip…' : 'กำลังเตรียมทริป...');
+    callBackend('addTrip', [val, null, discardTrashIds || null], res => {
+      appState = res;
+      updateAllUI();
+      if (fromOnboarding) {
+        // จบออนบอร์ดดิ้ง + ปิดหน้าโหลด แล้วเข้าหน้าแอปทันที
+        finishOnboarding();
+        hideAppLoading();
+      } else {
+        hideAppLoading();
+        showToast('สร้างทริปสำเร็จ', 'success');
+      }
+    });
   }
 
   // หน้าโหลดแอปชั่วคราว (ใช้สไตล์เดียวกับ splash) — แสดงระหว่างรอสร้างทริป
@@ -5554,8 +5715,8 @@
         <div class="p-3 danger-bg-soft rounded-lg flex items-start gap-2 text-sm">
           <i data-lucide="alert-triangle" class="h-4 w-4 shrink-0 mt-0.5 danger-text"></i>
           <div class="flex-1">
-            <div class="font-semibold danger-text mb-0.5">${isEn ? 'This cannot be undone' : 'การลบนี้กู้คืนไม่ได้'}</div>
-            <div class="text-xs text-soft">${isEn ? 'All expenses, friends, and history in this trip will be permanently deleted.' : 'รายจ่าย เพื่อน และประวัติทั้งหมดในทริปนี้จะถูกลบถาวร'}</div>
+            <div class="font-semibold danger-text mb-0.5">${isEn ? 'Kept for 7 days, then deleted for good' : 'เก็บไว้ 7 วัน แล้วจะถูกลบถาวร'}</div>
+            <div class="text-xs text-soft">${isEn ? 'You can restore this trip within 7 days from Settings → Deleted trips.' : 'กู้คืนได้ภายใน 7 วันที่ ตั้งค่า → ทริปที่ลบแล้ว'}</div>
           </div>
         </div>
         <div>
@@ -7968,7 +8129,7 @@
       // เฉพาะตอนอยู่บนสุดของ scroll container
       if (scroller.scrollTop > 5) return;
       // ไม่ทำงานถ้าแตะภายใน modal
-      if (e.target.closest('#confirmModal, #inputModal, #actionSheet')) return;
+      if (e.target.closest('#confirmModal, #inputModal, #actionSheet, #trashChoiceModal')) return;
       ptrStartY = e.touches[0].clientY;
       ptrPulling = true;
       ptrTriggered = false;
