@@ -991,6 +991,30 @@
     }
 
     /* ===== Floating Calculator Strip — ลอยใต้ช่อง input ===== */
+    /* ===== แอนิเมชันหลังบันทึก: โทเคนบินไปแท็บประวัติ + รายการใหม่เด้งเข้า ===== */
+    .fly-token {
+      position: fixed;
+      z-index: 200;
+      pointer-events: none;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: var(--primary);
+      color: var(--primary-text);
+      font-weight: 700;
+      font-size: 14px;
+      white-space: nowrap;
+      box-shadow: 0 8px 22px -6px rgba(0,0,0,0.35);
+    }
+    .hist-new { animation: histNew 1.4s ease-out both; }
+    @keyframes histNew {
+      0%   { transform: translateY(-16px) scale(0.96); opacity: 0; box-shadow: 0 0 0 0 transparent; }
+      22%  { transform: translateY(0) scale(1.03); opacity: 1; box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 35%, transparent); }
+      50%  { transform: scale(0.99); }
+      70%  { transform: scale(1); }
+      100% { transform: none; opacity: 1; box-shadow: 0 0 0 0 transparent; }
+    }
+    @media (prefers-reduced-motion: reduce) { .hist-new { animation: none; } }
+
     /* ลอยเกาะเหนือคีย์บอร์ด (ตำแหน่ง bottom คำนวณจาก visualViewport ใน positionCalcStrip) */
     .calc-strip {
       position: fixed;
@@ -3910,7 +3934,19 @@
     async function getAppData(requestedTripId) {
       try {
         await online();
-        const [tripsObj, catsObj, trashObj] = await Promise.all([read('trips'), read('categories'), read('trash')]);
+        const [tripsObj, catsObj0, trashObj] = await Promise.all([read('trips'), read('categories'), read('trash')]);
+        let catsObj = catsObj0;
+        // ครั้งแรกที่ยังไม่มีหมวดหมู่เลย → ใส่หมวดเริ่มต้น (เหมือนที่ Apps Script เคย setup ให้) — ทำครั้งเดียว ไม่เติมซ้ำถ้าผู้ใช้ลบเอง
+        if (!catsObj || Object.keys(catsObj).length === 0) {
+          try {
+            if (!(await read('meta/catsSeeded'))) {
+              const defs = [['อาหาร', '🍽️'], ['ที่พัก', '🏨'], ['เดินทาง', '🚕'], ['กิจกรรม', '🎟️'], ['ช้อปปิ้ง', '🛍️'], ['อื่นๆ', '📦']];
+              const u = { 'meta/catsSeeded': true }; catsObj = {};
+              defs.forEach((d, i) => { const k = 'c' + ('0000' + (i + 1)).slice(-4); catsObj[k] = { name: d[0], icon: d[1] }; u['categories/' + k] = catsObj[k]; });
+              await write(u);
+            }
+          } catch (e) { console.warn('seed categories failed', e); catsObj = catsObj0; }
+        }
         // ทริปที่ลบ: เก็บไว้ 7 วัน เกินแล้วลบถาวรอัตโนมัติ
         const now = Date.now(), trash = [], expired = [];
         Object.keys(trashObj || {}).forEach(id => {
@@ -4687,6 +4723,8 @@
     let catHTML = appState.categories.map(c =>
       `<option value="${escapeHtml(c.name)}">${c.icon} ${escapeHtml(c.name)}</option>`
     ).join('');
+    // ถ้ายังไม่มีหมวดเลย ต้องมีตัวเลือกว่างนำหน้า — ไม่งั้น "➕ เพิ่มหมวดหมู่" เป็นตัวเดียวที่ถูกเลือกอยู่แล้ว กดแล้วไม่เกิด change
+    if (appState.categories.length === 0) catHTML = `<option value="" selected>— เลือกหมวดหมู่ —</option>` + catHTML;
     catHTML += `<option value="__NEW__">➕ เพิ่มหมวดหมู่...</option>`;
     catSelect.innerHTML = catHTML;
     syncCategoryEmojiDisplay();
@@ -5181,6 +5219,56 @@
     });
   }
 
+  // ============ แอนิเมชันหลังบันทึก: โทเคนบินเด้งไปแท็บประวัติ ============
+  let _flashIds = null, _flashStart = 0;
+  const FLASH_MS = 1400;
+  function flyToHistory(data) {
+    const tid = data && data._tempId ? String(data._tempId) : null;
+    _flashIds = tid ? [tid, tid.replace(/^off_/, '')] : null;   // id ชั่วคราว + id จริงหลัง sync
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const btn = document.getElementById('btnSubmit');
+    const target = document.querySelector('.nav-item[data-target="view-history"] .nav-icon-wrap');
+    const go = () => {
+      switchTab('view-history');
+      _flashStart = Date.now();
+      updateHistoryUI();   // วาดใหม่ให้รายการที่เพิ่งบันทึกมีไฮไลต์
+      const el = document.querySelector('#historyList [data-hid].hist-new');
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    };
+    if (reduce || !btn || !target || !target.animate) { go(); return; }
+
+    const cat = (appState.categories || []).find(c => c.name === data.category);
+    const icon = data.type === 'Repayment' ? '🤝' : data.payer === '__POOL__' ? '🏦' : (cat ? cat.icon : '🏷️');
+    const amt = data.currency && data.currency !== 'THB' ? fmt(data.amount) + ' ' + data.currency : baht(data.amount);
+    const b = btn.getBoundingClientRect(), t = target.getBoundingClientRect();
+    const sx = b.left + b.width / 2, sy = b.top + b.height / 2;
+    const dx = t.left + t.width / 2 - sx, dy = t.top + t.height / 2 - sy;
+    const tok = document.createElement('div');
+    tok.className = 'fly-token';
+    tok.textContent = icon + ' ' + amt;
+    tok.style.left = sx + 'px'; tok.style.top = sy + 'px';
+    document.body.appendChild(tok);
+    const at = (fx, fy, s) => `translate(calc(-50% + ${fx}px), calc(-50% + ${fy}px)) scale(${s})`;
+    const fly = tok.animate([
+      { transform: at(0, 0, 0.6), opacity: 0, offset: 0 },
+      { transform: at(0, 0, 1.08), opacity: 1, offset: 0.15 },
+      { transform: at(dx * 0.45, dy * 0.45 - 90, 1), opacity: 1, offset: 0.55 },
+      { transform: at(dx, dy, 0.35), opacity: 0.3, offset: 1 }
+    ], { duration: 650, easing: 'ease-in-out', fill: 'forwards' });
+    let done = false;
+    const finish = () => {
+      if (done) return; done = true;
+      tok.remove();
+      try {
+        target.animate([{ scale: '1' }, { scale: '1.4' }, { scale: '0.9' }, { scale: '1.12' }, { scale: '1' }],
+                       { duration: 480, easing: 'ease-out' });                    // ไอคอนประวัติเด้ง
+      } catch (e) { /* เบราว์เซอร์เก่า: ข้ามเอฟเฟกต์เด้ง */ }
+      setTimeout(go, 220);
+    };
+    fly.onfinish = finish;
+    setTimeout(finish, 1200);   // กันกรณี animation ไม่ fire onfinish (แท็บอยู่เบื้องหลัง ฯลฯ)
+  }
+
   function submitData() {
     const type = document.getElementById('expenseType').value;
     const editingId = document.getElementById('editingId').value;
@@ -5310,10 +5398,12 @@
         updateAllUI();
         calculateSplit();
         showToast(wasEditing ? t('edit_success') : t('save_success'), 'success');
-        // ถ้าเป็นการแก้ไข กลับหน้าเดิม
+        // ถ้าเป็นการแก้ไข กลับหน้าเดิม / ถ้าเพิ่มใหม่ → โทเคนบินเด้งไปหน้าประวัติ
         if (wasEditing) {
           const returnTo = _editReturnTab || 'view-history';
           switchTab(returnTo);
+        } else {
+          flyToHistory(data);
         }
       } catch (e) {
         console.error('UI update error:', e);
@@ -7335,8 +7425,15 @@
     // Refund and Topup ห้ามแก้ไข (เป็น batch operation)
     const canEdit = !isTopup && !isRefund;
 
+    // รายการที่เพิ่งบันทึก → เด้งไฮไลต์ (ใช้ delay ติดลบ ถ้าถูกวาดใหม่ระหว่างเล่น แอนิเมชันจะไม่เริ่มใหม่)
+    let flashCls = '', flashStyle = '';
+    if (_flashIds && _flashStart && _flashIds.includes(String(h.id))) {
+      const elapsed = Date.now() - _flashStart;
+      if (elapsed < FLASH_MS) { flashCls = ' hist-new'; flashStyle = ` style="animation-delay:-${elapsed}ms"`; }
+    }
+
     return `
-      <div class="surface p-3.5 rounded-2xl shadow-soft border border-themed flex gap-3 card-hover">
+      <div data-hid="${escapeHtml(String(h.id))}" class="surface p-3.5 rounded-2xl shadow-soft border border-themed flex gap-3 card-hover${flashCls}"${flashStyle}>
         <div class="w-10 h-10 rounded-full flex items-center justify-center text-xl ${iconBgClass} shrink-0">${cIcon}</div>
         <div class="flex-1 min-w-0">
           <div class="flex justify-between items-start mb-0.5 gap-2">
