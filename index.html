@@ -5232,8 +5232,19 @@
       switchTab('view-history');
       _flashStart = Date.now();
       updateHistoryUI();   // วาดใหม่ให้รายการที่เพิ่งบันทึกมีไฮไลต์
-      const el = document.querySelector('#historyList [data-hid].hist-new');
-      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      // เลื่อนขึ้นบนสุดทันที (ไม่ smooth — กันถูกการวาดใหม่ขัดจังหวะ)
+      const sc = document.getElementById('appContent');
+      if (sc) { try { sc.scrollTo({ top: 0, behavior: 'instant' }); } catch (e) { sc.scrollTop = 0; } }
+      try { window.scrollTo(0, 0); } catch (e) {}
+      // รายการใหม่ไม่ได้อยู่ในจอ (เช่น บันทึกย้อนหลังวันที่เก่า) → เลื่อนไปหา เฉพาะกรณีนี้
+      setTimeout(() => {
+        const row = document.querySelector('#historyList .hist-new');
+        if (!row || !sc) return;
+        const r = row.getBoundingClientRect(), v = sc.getBoundingClientRect();
+        const navH = (document.querySelector('nav.glass-nav') || { offsetHeight: 80 }).offsetHeight;
+        const visible = r.top >= v.top && r.bottom <= v.bottom - navH;
+        if (!visible && row.scrollIntoView) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 80);
     };
     if (reduce || !btn || !target || !target.animate) { go(); return; }
 
