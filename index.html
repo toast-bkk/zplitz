@@ -2116,7 +2116,7 @@
     <div id="trashChoiceIcon" class="text-4xl text-center mb-2"></div>
     <h3 id="trashChoiceTitle" class="text-lg font-bold text-center mb-2 text-main"></h3>
     <p id="trashChoiceMsg" class="text-soft text-center text-sm mb-5"></p>
-    <div id="trashChoiceBtns" class="space-y-2"></div>
+    <div id="trashChoiceBtns" class="space-y-2" style="max-height:55vh;overflow-y:auto"></div>
   </div>
 </div>
 
@@ -2367,23 +2367,26 @@
 
 <!-- ===== Page: Summary ===== -->
 <main id="view-summary" class="page-view active w-full max-w-md mx-auto p-4 space-y-4">
+  <div id="myBalanceCard" class="hidden"></div>
   <div class="rounded-2xl p-6 shadow-strong" style="background: linear-gradient(135deg, var(--primary), var(--primary-hover)); color: var(--primary-text);">
     <p class="text-sm font-medium mb-1 opacity-80" data-i18n="trip_total">ยอดใช้จ่ายทริปทั้งหมด</p>
     <h2 class="text-4xl font-bold tracking-tight" id="totalSpent">฿0.00</h2>
     <p class="text-xs mt-2 opacity-70" data-i18n="exclude_repayment">*ไม่รวมรายการจ่ายคืนกันเอง</p>
   </div>
+  <div id="budgetCard" class="hidden"></div>
 
   <!-- Dashboard: Stats grid -->
   <div class="grid grid-cols-2 gap-3" id="statsGrid">
     <div class="surface rounded-2xl p-4 shadow-soft border border-themed">
       <div class="flex items-center gap-2 mb-1">
         <div class="w-7 h-7 rounded-lg accent-bg-soft flex items-center justify-center">
-          <i data-lucide="receipt" class="h-3.5 w-3.5" id="statCardIcon"></i>
+          <i data-lucide="calendar-days" class="h-3.5 w-3.5" id="statCardIcon"></i>
         </div>
-        <span class="text-[10px] text-soft uppercase font-semibold tracking-wider" id="statCardLabel" data-i18n="count_items">รายการ</span>
+        <span class="text-[10px] text-soft uppercase font-semibold tracking-wider" id="statCardLabel">เฉลี่ย/วัน</span>
       </div>
       <!-- โหมดปกติ: จำนวนรายการ -->
-      <div class="text-2xl font-bold text-main" id="statCount">0</div>
+      <div class="text-2xl font-bold text-main" id="statCount">฿0</div>
+      <div class="text-[10px] text-muted mt-0.5" id="statCountSub"></div>
       <!-- โหมดนาฬิกา: เวลาไทย vs เวลาเครื่อง (แสดงเมื่ออยู่ต่างโซน) -->
       <div id="statClock" class="hidden space-y-1">
         <div class="flex items-center justify-between gap-1">
@@ -3701,7 +3704,7 @@
   // Write operations ที่ queue ได้ตอน offline
   // บันทึก/แก้/ลบรายการ: อัปเดตจอทันที แล้ว sync ขึ้น Firebase เบื้องหลัง (ผู้ใช้ไม่ต้องรอ)
   const FAST_WRITE = new Set(['addExpense', 'editExpense', 'deleteExpense']);
-  const OFFLINE_WRITABLE = new Set(['addExpense', 'editExpense', 'deleteExpense', 'addParticipant', 'deleteParticipant', 'addTrip', 'renameTrip', 'addCategory', 'setTripPool', 'addTopupAll', 'refundPool']);
+  const OFFLINE_WRITABLE = new Set(['addExpense', 'editExpense', 'deleteExpense', 'addParticipant', 'deleteParticipant', 'addTrip', 'renameTrip', 'addCategory', 'setTripPool', 'addTopupAll', 'refundPool', 'setTripBudget']);
 
   // Helper: cache key สำหรับ getAppData ต่อ trip
   function cacheKeyFor(fnName, args) {
@@ -3963,7 +3966,7 @@
         const trips = Object.keys(tripsObj || {}).sort(byKey).map(id => {
           const t = tripsObj[id] || {};
           return { id: String(id), name: String(t.name == null ? '' : t.name), createdAt: t.createdAt || null,
-                   hasPool: t.hasPool === true || t.hasPool === 'true' };
+                   hasPool: t.hasPool === true || t.hasPool === 'true', budget: Number(t.budget) || 0 };
         });
         if (trips.length === 0) {
           // ไม่มีทริปเลย (เช่น ลบหมดแล้ว) → คืนสถานะว่าง ให้แอปขึ้นหน้าสร้างทริป
@@ -3972,12 +3975,13 @@
             .filter(c => c.name !== '' && c.name != null)
             .map(c => ({ name: String(c.name).trim(), icon: c.icon || '📦' }));
           return { trips: [], activeTripId: null, hasPool: false, participants: [], categories: emptyCats,
-                   history: [], totalSpent: 0, settlements: [], balances: {}, pool: computePoolSummary([], []), trash };
+                   history: [], totalSpent: 0, settlements: [], balances: {}, pool: computePoolSummary([], []), trash, budget: 0 };
         }
         let activeTripId = requestedTripId ? String(requestedTripId) : null;
         if (!activeTripId || !trips.find(t => t.id === activeTripId)) activeTripId = trips[trips.length - 1].id;
         const activeTrip = trips.find(t => t.id === activeTripId);
         const hasPool = activeTrip ? activeTrip.hasPool : false;
+        const budget = activeTrip ? activeTrip.budget : 0;
 
         const [participants, expObj] = await Promise.all([
           participantsOf(activeTripId), read('expenses/' + activeTripId)
@@ -4004,7 +4008,7 @@
         const pool = computePoolSummary(rows, participants);
         const settlements = computeSettlements(balances);
         try { watchTrip(activeTripId); } catch (e) { console.warn('watch failed', e); }
-        return { trips, activeTripId, hasPool, participants, categories, history, totalSpent, settlements, balances, pool, trash };
+        return { trips, activeTripId, hasPool, budget, participants, categories, history, totalSpent, settlements, balances, pool, trash };
       } catch (err) {
         return { error: 'เกิดข้อผิดพลาด: ' + (err && err.message || err) };
       }
@@ -4103,6 +4107,13 @@
       res._newId = tripId;
       return res;
     }
+    // งบประมาณทริป (บาท) — 0 หรือเว้นว่าง = ลบงบ
+    async function setTripBudget(tripId, amount) {
+      await online();
+      const v = parseFloat(String(amount == null ? '' : amount).replace(/,/g, ''));
+      if (await read('trips/' + tripId)) await write({ ['trips/' + tripId + '/budget']: v > 0 ? v : null });
+      return getAppData(tripId);
+    }
     async function setTripPool(tripId, enabled) {
       await online();
       if (await read('trips/' + tripId)) {
@@ -4199,7 +4210,7 @@
     // ---------- dispatcher (whitelist เหมือน ALLOWED_FUNCTIONS เดิม) ----------
     const API = { getAppData, addExpense, editExpense, deleteExpense, addTopupAll, refundPool,
                   addTrip, renameTrip, deleteTrip, setTripPool, addParticipant, deleteParticipant,
-                  addCategory, deleteCategory, restoreTrip, purgeTrash };
+                  addCategory, deleteCategory, restoreTrip, purgeTrash, setTripBudget };
     // ตำแหน่ง arg ที่ใช้เก็บ idempotency key — stamp ลง array เดิม (ตัวเดียวกับที่แอป queue) เพื่อให้ retry ใช้ id เดิม
     const IDEM_POS = { addTopupAll: 5, refundPool: 1, addTrip: 1 };
     async function call(fn, args) {
@@ -4347,6 +4358,11 @@
       const tr = (appState.trips || []).find(x => String(x.id) === String(tripId));
       if (tr) tr.hasPool = (enabled === true || enabled === 'true');
       if (String(tripId) === String(active)) appState.hasPool = (enabled === true || enabled === 'true');
+    } else if (fnName === 'setTripBudget') {
+      const tripId = args[0], v = Number(args[1]) || 0;
+      const tr = (appState.trips || []).find(x => String(x.id) === String(tripId));
+      if (tr) tr.budget = v;
+      if (String(tripId) === String(active)) appState.budget = v;
     }
     // addTopupAll / refundPool: ผลกระทบซับซ้อน (หลาย record + คำนวณ pool)
     // แสดง toast "บันทึกออฟไลน์" พอ แล้วให้ backend คำนวณจริงตอน sync
@@ -5748,6 +5764,134 @@
     };
   }
 
+  // ============ งบประมาณทริป ============
+  function renderBudgetCard() {
+    const box = document.getElementById('budgetCard');
+    if (!box) return;
+    const en = getLang() === 'en';
+    if (!appState.activeTripId) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.classList.remove('hidden');
+    const budget = Number(appState.budget) || 0;
+    const spent = appState.totalSpent || 0;
+    if (budget <= 0) {
+      box.innerHTML = `<button onclick="openBudgetModal()" class="w-full flex items-center justify-center gap-2 p-3 rounded-2xl border border-themed border-dashed text-sm font-medium text-soft">
+        <i data-lucide="wallet" class="h-4 w-4"></i> ${en ? 'Set trip budget' : 'ตั้งงบประมาณทริป'}</button>`;
+    } else {
+      const pct = spent / budget * 100, over = spent > budget;
+      const color = over ? 'var(--danger)' : pct >= 80 ? 'var(--warning)' : 'var(--success)';
+      box.innerHTML = `<div class="surface rounded-2xl p-4 shadow-soft border border-themed">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[10px] text-soft uppercase font-semibold tracking-wider">${en ? 'Budget' : 'งบประมาณ'}</span>
+          <button onclick="openBudgetModal()" class="text-xs text-soft flex items-center gap-1"><i data-lucide="pencil" class="h-3 w-3"></i> ${baht(budget, 0)}</button>
+        </div>
+        <div class="h-2.5 rounded-full surface-2 overflow-hidden"><div class="h-full rounded-full" style="width:${Math.min(100, pct)}%;background:${color};transition:width .4s ease"></div></div>
+        <div class="flex items-center justify-between mt-2 text-sm">
+          <span class="font-semibold text-main">${en ? 'Spent' : 'ใช้ไป'} ${baht(spent, 0)} <span class="text-soft font-normal">(${Math.round(pct)}%)</span></span>
+          <span class="font-bold" style="color:${color}">${over ? (en ? 'Over by ' : 'เกินงบ ') + baht(spent - budget, 0) : (en ? 'Left ' : 'เหลือ ') + baht(budget - spent, 0)}</span>
+        </div></div>`;
+    }
+    if (window.lucide) lucide.createIcons();
+  }
+
+  function openBudgetModal() {
+    const en = getLang() === 'en';
+    const cur = Number(appState.budget) || 0;
+    document.getElementById('inputModalTitle').innerText = en ? 'Trip budget' : 'งบประมาณทริป';
+    document.getElementById('inputModalBody').innerHTML = `
+      <input type="text" inputmode="decimal" id="modalInput1" class="w-full py-2 px-3 input-themed rounded-lg" placeholder="${en ? 'Amount in THB, e.g. 20000' : 'จำนวนเงิน (บาท) เช่น 20000'}" autocomplete="off" value="${cur || ''}">
+      <p class="text-xs text-muted mt-2">${en ? 'Leave empty to remove the budget' : 'เว้นว่างเพื่อลบงบประมาณ'}</p>`;
+    toggleModal('inputModal', true);
+    setTimeout(() => { const i = document.getElementById('modalInput1'); if (i) { i.focus({ preventScroll: true }); i.select(); } }, 250);
+    document.getElementById('inputModalSubmit').onclick = () => {
+      const raw = document.getElementById('modalInput1').value.replace(/[,\s฿]/g, '');
+      const v = raw === '' ? 0 : parseFloat(raw);
+      if (isNaN(v) || v < 0) { showToast(en ? 'Enter a valid amount' : 'กรอกจำนวนเงินให้ถูกต้อง', 'error'); return; }
+      closeModal('inputModal');
+      callBackend('setTripBudget', [appState.activeTripId, v], res => {
+        appState = res;
+        updateAllUI();
+        showToast(v > 0 ? (en ? 'Budget saved' : 'บันทึกงบประมาณแล้ว') : (en ? 'Budget removed' : 'ลบงบประมาณแล้ว'), 'success');
+      });
+    };
+  }
+
+  // ============ ยอดของฉัน ("ฉันคือใคร" จำไว้ต่อเครื่อง ต่อทริป) ============
+  const meKey = () => 'zplitz_me_' + (appState && appState.activeTripId);
+  function setMe(name) {
+    try { localStorage.setItem(meKey(), name); } catch (e) {}
+    renderMyBalance();
+  }
+  function pickMe(i) {
+    const p = (appState.participants || [])[i];
+    if (p !== undefined) setMe(p);
+  }
+  function openMePicker() {
+    const en = getLang() === 'en';
+    const people = appState.participants || [];
+    let me = null; try { me = localStorage.getItem(meKey()); } catch (e) {}
+    askChoice({
+      icon: '👤',
+      title: en ? 'Who are you?' : 'คุณคือใคร?',
+      msg: en ? 'Pick your name to see your balance' : 'เลือกชื่อของคุณเพื่อดูยอดของคุณ',
+      buttons: people.map(p => ({ label: p, kind: p === me ? 'primary' : 'plain', onClick: () => setMe(p) }))
+        .concat([{ label: en ? 'Not in this trip' : 'ไม่ได้อยู่ในทริปนี้', kind: 'plain', onClick: () => setMe('__none__') }])
+    });
+  }
+
+  function renderMyBalance() {
+    const box = document.getElementById('myBalanceCard');
+    if (!box) return;
+    const en = getLang() === 'en';
+    const people = appState.participants || [];
+    if (!appState.activeTripId || people.length === 0) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.classList.remove('hidden');
+    let me = null; try { me = localStorage.getItem(meKey()); } catch (e) {}
+    if (me && me !== '__none__' && !people.includes(me)) me = null;   // ชื่อนี้ถูกลบแล้ว → ถามใหม่
+
+    if (!me) {
+      box.innerHTML = `<div class="surface rounded-2xl p-4 shadow-soft border border-themed">
+        <p class="text-sm font-semibold text-main mb-0.5">${en ? 'Who are you?' : 'คุณคือใคร?'}</p>
+        <p class="text-xs text-soft mb-3">${en ? 'Pick your name to see what you owe or get back' : 'เลือกชื่อของคุณ เพื่อดูว่าต้องจ่ายหรือรอรับเท่าไหร่'}</p>
+        <div class="flex flex-wrap gap-2">
+          ${people.map((p, i) => `<button onclick="pickMe(${i})" class="px-3 py-1.5 rounded-full surface-2 border border-themed text-sm font-medium text-main">${escapeHtml(p)}</button>`).join('')}
+          <button onclick="setMe('__none__')" class="px-3 py-1.5 rounded-full text-xs text-muted">${en ? 'Skip' : 'ข้าม'}</button>
+        </div></div>`;
+      return;
+    }
+    if (me === '__none__') {
+      box.innerHTML = `<button onclick="openMePicker()" class="w-full flex items-center justify-center gap-2 p-2.5 rounded-2xl text-xs font-medium text-soft">
+        <span>👤</span> ${en ? 'See my balance — pick your name' : 'ดูยอดของฉัน — เลือกชื่อ'}</button>`;
+      return;
+    }
+
+    const b = (appState.balances || {})[me] || { paid: 0, share: 0, net: 0 };
+    const net = b.net || 0;
+    const owe = net < -0.5, get = net > 0.5;
+    const color = owe ? 'var(--danger)' : get ? 'var(--success)' : 'var(--text-2)';
+    const head = owe ? (en ? 'You owe' : 'คุณต้องจ่าย') : get ? (en ? 'You get back' : 'คุณรอรับ') : (en ? 'You are all settled' : 'คุณไม่มียอดค้าง');
+    const rows = (appState.settlements || []).map((s, idx) => ({ s, idx })).filter(x => x.s.from === me || x.s.to === me).map(({ s, idx }) => {
+      const pay = s.from === me;
+      return `<div class="flex items-center gap-2 py-2 border-t border-themed">
+        <span class="text-lg shrink-0">${pay ? '➡️' : '⬅️'}</span>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm text-main truncate">${pay ? (en ? 'Pay ' : 'โอนให้ ') + escapeHtml(s.to) : escapeHtml(s.from) + (en ? ' pays you' : ' โอนให้คุณ')}</div>
+          <div class="text-sm font-bold" style="color:${pay ? 'var(--danger)' : 'var(--success)'}">${baht(s.amount)}</div>
+        </div>
+        <button onclick="markAsPaid(${idx})" class="px-3 py-1.5 rounded-lg text-xs font-semibold accent-bg-soft text-main shrink-0">${pay ? (en ? 'Paid' : 'จ่ายแล้ว') : (en ? 'Received' : 'ได้รับแล้ว')}</button>
+      </div>`;
+    }).join('');
+    box.innerHTML = `<div class="surface rounded-2xl p-4 shadow-soft border border-themed">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[10px] text-soft uppercase font-semibold tracking-wider">👤 ${escapeHtml(me)}</span>
+        <button onclick="openMePicker()" class="text-xs text-muted">${en ? 'Change' : 'เปลี่ยน'}</button>
+      </div>
+      <div class="text-sm text-soft">${head}</div>
+      <div class="text-3xl font-bold tracking-tight" style="color:${color}">${owe || get ? baht(Math.abs(net)) : '✓'}</div>
+      <div class="text-xs text-muted mt-1">${en ? 'Paid' : 'จ่ายไป'} ${baht(b.paid, 0)} · ${en ? 'My share' : 'ส่วนของฉัน'} ${baht(b.share, 0)}</div>
+      ${rows ? `<div class="mt-3">${rows}</div>` : ''}
+    </div>`;
+  }
+
   function openNewCategoryModal() {
     document.getElementById('inputModalTitle').innerText = 'เพิ่มหมวดหมู่ใหม่';
     document.getElementById('inputModalBody').innerHTML = `
@@ -6142,14 +6286,16 @@
     if (isThailand || !card) {
       if (card) card.classList.add('hidden');
       if (countEl) countEl.classList.remove('hidden');
-      if (label) { label.removeAttribute('data-i18n'); label.innerText = getLang() === 'en' ? 'ITEMS' : 'รายการ'; }
-      if (icon) icon.setAttribute('data-lucide', 'receipt');
+      const subEl = document.getElementById('statCountSub'); if (subEl) subEl.classList.remove('hidden');
+      if (label) { label.removeAttribute('data-i18n'); label.innerText = getLang() === 'en' ? 'AVG / DAY' : 'เฉลี่ย/วัน'; }
+      if (icon) icon.setAttribute('data-lucide', 'calendar-days');
       if (_clockTimer) { clearInterval(_clockTimer); _clockTimer = null; }
       return;
     }
 
     // อยู่ต่างโซน → แสดงนาฬิกาเทียบ
     countEl.classList.add('hidden');
+    const subEl2 = document.getElementById('statCountSub'); if (subEl2) subEl2.classList.add('hidden');
     card.classList.remove('hidden');
     if (label) { label.removeAttribute('data-i18n'); label.innerText = getLang() === 'en' ? 'LOCAL TIME' : 'เวลาท้องถิ่น'; }
     if (icon) { icon.setAttribute('data-lucide', 'clock'); lucide.createIcons(); }
@@ -6248,7 +6394,8 @@
     // 3) เฉลี่ยต่อวัน (ถ้าทริปกินเวลามากกว่า 1 วัน)
     const dates = expenses.map(h => new Date(h.date).toDateString());
     const uniqueDays = new Set(dates).size;
-    if (uniqueDays >= 1 && appState.totalSpent > 0) {
+    const clockMode = Intl.DateTimeFormat().resolvedOptions().timeZone !== 'Asia/Bangkok';   // โหมดนาฬิกา: การ์ดสถิติไม่ได้แสดงเฉลี่ย/วัน
+    if (clockMode && uniqueDays >= 1 && appState.totalSpent > 0) {
       rows.push({
         icon: '📆',
         label: en ? `Avg per day (${uniqueDays} ${uniqueDays > 1 ? 'days' : 'day'})` : `เฉลี่ยต่อวัน (${uniqueDays} วัน)`,
@@ -6277,8 +6424,13 @@
     el.classList.add('number-pop');
 
     // Stats grid
-    const expenseCount = appState.history.filter(h => h.type !== 'Repayment' && h.type !== 'Topup' && h.type !== 'Refund').length;
-    document.getElementById('statCount').innerText = expenseCount;
+    const expRows = appState.history.filter(h => h.type !== 'Repayment' && h.type !== 'Topup' && h.type !== 'Refund');
+    const expenseCount = expRows.length;
+    const spendDays = new Set(expRows.map(h => new Date(h.date).toDateString())).size;   // จำนวนวันที่มีการใช้จ่ายจริง
+    const enS = getLang() === 'en';
+    document.getElementById('statCount').innerText = baht(spendDays > 0 ? appState.totalSpent / spendDays : 0);
+    const subS = document.getElementById('statCountSub');
+    if (subS) subS.innerText = expenseCount ? (enS ? `${spendDays} ${spendDays > 1 ? 'days' : 'day'} · ${expenseCount} items` : `${spendDays} วัน · ${expenseCount} รายการ`) : '';
     updateWorldClock();
     const avgPerPerson = appState.participants.length > 0
       ? appState.totalSpent / appState.participants.length
@@ -6286,6 +6438,8 @@
     document.getElementById('statAvg').innerText = baht(avgPerPerson);
 
     renderInsights();
+    renderBudgetCard();
+    renderMyBalance();
 
     // Balance list — compact & clean
     const bDiv = document.getElementById('balanceList');
