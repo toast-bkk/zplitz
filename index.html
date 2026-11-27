@@ -2295,6 +2295,10 @@
     <div id="noteSection">
       <label class="block text-[11px] font-semibold text-soft uppercase mb-1 tracking-wider">📝 Note</label>
       <textarea id="noteInput" rows="2" class="w-full py-2 px-3 input-themed rounded-lg text-sm resize-none" data-i18n-placeholder="note_placeholder" placeholder="โน้ตเพิ่มเติม (ไม่บังคับ)"></textarea>
+      <label class="flex items-start gap-2 mt-2 cursor-pointer select-none">
+        <input type="checkbox" id="prepaidInput" class="mt-0.5 h-4 w-4 shrink-0" style="accent-color: var(--primary);">
+        <span class="text-xs text-soft leading-snug" data-i18n="prepaid_label">จ่ายล่วงหน้า เช่น ตั๋วเครื่องบิน/ที่พัก (ไม่นับในเฉลี่ยต่อวัน)</span>
+      </label>
     </div>
   </section>
 
@@ -2881,6 +2885,7 @@
       rename_trip: 'เปลี่ยนชื่อทริป',
       delete_trip: 'ลบทริปนี้',
       trash_trips: 'ทริปที่ลบแล้ว (กู้คืนได้ 7 วัน)',
+      prepaid_label: 'จ่ายล่วงหน้า เช่น ตั๋วเครื่องบิน/ที่พัก (ไม่นับในเฉลี่ยต่อวัน)',
       delete_trip_msg: 'ทริปจะถูกเก็บไว้ 7 วัน กู้คืนได้ก่อนถูกลบถาวร',
       // Offline
       offline_banner: 'ออฟไลน์ — บันทึกจะ sync เมื่อกลับมาออนไลน์',
@@ -3060,6 +3065,7 @@
       rename_trip: 'Rename trip',
       delete_trip: 'Delete this trip',
       trash_trips: 'Deleted trips (restore within 7 days)',
+      prepaid_label: 'Prepaid, e.g. flights/hotel (excluded from daily average)',
       delete_trip_msg: 'The trip is kept for 7 days and can be restored before it is deleted for good.',
       offline_banner: 'Offline — saves will sync when back online',
       syncing: 'Syncing...',
@@ -3797,15 +3803,31 @@
       if (s && typeof s === 'object') return s;
       try { return JSON.parse(s || '{}'); } catch (e) { return {}; }
     }
-    function resolveDate(dateStr, base) {
-      const b = base && !isNaN(new Date(base)) ? new Date(base) : new Date();
-      if (dateStr && typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
-        const p = dateStr.split('-');
-        return new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10),
-                        b.getHours(), b.getMinutes(), b.getSeconds());
-      }
-      return b;
+    // ===== วันเวลา: บันทึกเป็นเวลาท้องถิ่นของที่ที่อยู่ตอนนั้น + offset ("2026-11-20T20:15:30+09:00") =====
+    // แสดงผลตามเวลาที่เขียนไว้ ไม่เปลี่ยนตามโซนเวลาของเครื่องที่เปิดดูทีหลัง (กลับไทยแล้วเวลายังเท่าเดิม)
+    const BKK_MS = 7 * 3600000;                 // ข้อมูลเก่า (เก็บเป็น UTC) ถือเป็นเวลาไทย
+    const OFFSET_RE = /([+-]\d{2}:\d{2})$/;
+    const p2 = n => String(n).padStart(2, '0');
+    function localOffset(d) { const m = -d.getTimezoneOffset(), a = Math.abs(m); return (m >= 0 ? '+' : '-') + p2(Math.floor(a / 60)) + ':' + p2(a % 60); }
+    function wallOf(d) { return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + 'T' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds()); }
+    const nowStamp = () => { const d = new Date(); return wallOf(d) + localOffset(d); };
+    const tzName = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (e) { return null; } };
+    const offsetOf = s => { const m = OFFSET_RE.exec(String(s)); return m ? m[1] : '+07:00'; };
+    function wallString(s) {                    // → "YYYY-MM-DDTHH:mm:ss" (เวลาตามที่อยู่ตอนบันทึก)
+      s = String(s || '');
+      if (OFFSET_RE.test(s)) return s.slice(0, 19);
+      const ms = Date.parse(s);
+      return isNaN(ms) ? wallOf(new Date()) : new Date(ms + BKK_MS).toISOString().slice(0, 19);
     }
+    const instantOf = s => { const ms = Date.parse(String(s || '')); return isNaN(ms) ? 0 : ms; };
+    // วันที่ที่ผู้ใช้เลือก + เวลาตอนนี้ของที่ที่อยู่ (ถ้าแก้รายการเดิม: คงเวลา/โซนเดิม เปลี่ยนแค่วัน)
+    function stampFor(dateStr, oldStored) {
+      const now = new Date();
+      let time = p2(now.getHours()) + ':' + p2(now.getMinutes()) + ':' + p2(now.getSeconds()), off = localOffset(now);
+      if (oldStored) { time = wallString(oldStored).slice(11, 19); off = offsetOf(oldStored); }
+      return String(dateStr).slice(0, 10) + 'T' + time + off;
+    }
+    const validDay = s => !!(s && typeof s === 'string' && /^\d{4}-\d{2}-\d{2}/.test(s));
     function computeBaseAmount(amount, currency, rate) {
       amount = parseFloat(amount) || 0;
       rate = parseFloat(rate) || 1;
@@ -3824,7 +3846,8 @@
         baseAmount: computeBaseAmount(data.amount, data.currency, data.exchangeRate),
         splitDetails: JSON.stringify(data.splitDetails || {}),
         note: data.note || '',
-        type: data.type || 'Expense'
+        type: data.type || 'Expense',
+        prepaid: data.prepaid === true ? true : null     // จ่ายล่วงหน้า (ไม่นับในเฉลี่ยต่อวัน)
       };
     }
     function toRows(obj) {
@@ -3837,7 +3860,7 @@
           payer: e.payer == null ? '' : String(e.payer),
           amount: e.amount, currency: e.currency, exchangeRate: e.exchangeRate,
           baseAmount: e.baseAmount, splitDetails: safeParse(e.splitDetails),
-          note: e.note || '', type: e.type || 'Expense'
+          note: e.note || '', type: e.type || 'Expense', prepaid: e.prepaid === true, tz: e.tz || null
         };
       });
     }
@@ -3993,11 +4016,12 @@
         const rows = toRows(expObj);
         const history = rows.map(r => ({
           id: r.id,
-          date: r.date ? new Date(r.date).toISOString() : new Date().toISOString(),
+          date: r.date ? wallString(r.date) : wallOf(new Date()),   // เวลาตามที่อยู่ตอนบันทึก
+          ts: instantOf(r.date), prepaid: r.prepaid, tz: r.tz,
           item: r.item, category: r.category, payer: r.payer,
           amount: r.amount, currency: r.currency, exchangeRate: r.exchangeRate, baseAmount: r.baseAmount,
           details: r.splitDetails, note: r.note, type: r.type
-        })).sort((a, b) => new Date(b.date) - new Date(a.date));
+        })).sort((a, b) => b.ts - a.ts);
 
         const totalSpent = rows.reduce((sum, r) => {
           const t = r.type || 'Expense';
@@ -4023,7 +4047,8 @@
       const id = String(data._tempId).replace(/^off_/, '').replace(/[.#$\[\]\/]/g, '_');
       const category = data.type === 'Repayment' ? 'Repayment' : data.category;
       const rec = expenseFields(data, category);
-      rec.date = resolveDate(data.date, null).toISOString();
+      rec.date = validDay(data.date) ? stampFor(data.date, null) : nowStamp();
+      rec.tz = tzName();
       await write({ ['expenses/' + data.tripId + '/' + id]: rec });
       const res = await getAppData(data.tripId);
       res._newId = String(id);
@@ -4039,9 +4064,7 @@
         const f = expenseFields(data, category);
         const updates = {};
         Object.keys(f).forEach(k => updates[path + '/' + k] = f[k]);
-        if (data.date && typeof data.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(data.date)) {
-          updates[path + '/date'] = resolveDate(data.date, old.date).toISOString();
-        }
+        if (validDay(data.date)) updates[path + '/date'] = stampFor(data.date, old.date);
         await write(updates);
       }
       return getAppData(data.tripId);
@@ -4058,7 +4081,7 @@
       if (per <= 0 || participants.length === 0) return getAppData(tripId);
       const baseAmount = computeBaseAmount(per, currency || 'THB', exchangeRate || 1);
       const baseTime = idem ? Number(idem) : uniqueTs(participants.length);
-      const date = new Date().toISOString();
+      const date = nowStamp();
       const updates = {};
       participants.forEach((name, idx) => {
         updates['expenses/' + tripId + '/' + (baseTime + idx)] = {
@@ -4081,7 +4104,7 @@
       }
       const perPerson = remaining / participants.length;
       const baseTime = idem ? Number(idem) : uniqueTs(participants.length);
-      const date = new Date().toISOString();
+      const date = nowStamp();
       const updates = {};
       participants.forEach((name, idx) => {
         updates['expenses/' + tripId + '/' + (baseTime + idx)] = {
@@ -4283,7 +4306,7 @@
         date: d.date ? new Date(d.date + 'T12:00:00').toISOString() : new Date().toISOString(),
         item: d.item || '', category: d.category, payer: d.payer,
         amount: amt, currency: cur, exchangeRate: rate, baseAmount: base,
-        details: d.splitDetails || {}, note: d.note || '', type: d.type || 'Expense',
+        details: d.splitDetails || {}, note: d.note || '', type: d.type || 'Expense', prepaid: d.prepaid === true,
         _pending: true
       };
       appState.history = appState.history || [];
@@ -4305,7 +4328,7 @@
         h.payer = d.payer != null ? d.payer : h.payer;
         h.amount = amt; h.currency = cur; h.exchangeRate = rate; h.baseAmount = newBase;
         h.details = d.splitDetails || h.details; h.note = d.note != null ? d.note : h.note;
-        h.type = d.type || h.type; h._pending = true;
+        h.type = d.type || h.type; h.prepaid = d.prepaid === true; h._pending = true;
         if (d.date) h.date = new Date(d.date + 'T12:00:00').toISOString();
         if (!NON_SPEND.includes(h.type)) appState.totalSpent = (appState.totalSpent || 0) + newBase;
       }
@@ -4822,7 +4845,7 @@
       // ล้าง form
       document.getElementById('amount').value = '';
       document.getElementById('item').value = '';
-      const ni = document.getElementById('noteInput'); if (ni) ni.value = '';
+      const ni = document.getElementById('noteInput'); if (ni) ni.value = ''; const ppx = document.getElementById('prepaidInput'); if (ppx) ppx.checked = false;
     }
     document.querySelectorAll('.page-view').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
@@ -5224,7 +5247,7 @@
       try {
         appState = res;
         document.getElementById('topupPerPerson').value = '';
-        const ni = document.getElementById('noteInput'); if (ni) ni.value = '';
+        const ni = document.getElementById('noteInput'); if (ni) ni.value = ''; const ppx = document.getElementById('prepaidInput'); if (ppx) ppx.checked = false;
         updateAllUI();
         showToast(`เติมกองครบทุกคน (${appState.participants.length} คน)`, 'success');
         switchTab('view-summary');
@@ -5392,7 +5415,8 @@
       exchangeRate: document.getElementById('exchangeRate').value,
       splitDetails: splitDetails,
       date: dateStr,
-      note: (document.getElementById('noteInput') ? document.getElementById('noteInput').value : '') || ''
+      note: (document.getElementById('noteInput') ? document.getElementById('noteInput').value : '') || '',
+      prepaid: !!(document.getElementById('prepaidInput') && document.getElementById('prepaidInput').checked)
     };
 
     localStorage.setItem('trip_payer', data.payer);
@@ -5420,7 +5444,7 @@
         cancelEdit(true); // silent: ล้าง form แต่ไม่ switchTab (จะทำเองข้างล่าง)
         document.getElementById('amount').value = '';
         document.getElementById('item').value = '';
-        const ni = document.getElementById('noteInput'); if (ni) ni.value = '';
+        const ni = document.getElementById('noteInput'); if (ni) ni.value = ''; const ppx = document.getElementById('prepaidInput'); if (ppx) ppx.checked = false;
         const tp = document.getElementById('tipPercent'); if (tp) tp.value = '';
         updateAllUI();
         calculateSplit();
@@ -5457,7 +5481,7 @@
     if (wasEditing) {
       document.getElementById('amount').value = '';
       document.getElementById('item').value = '';
-      const ni = document.getElementById('noteInput'); if (ni) ni.value = '';
+      const ni = document.getElementById('noteInput'); if (ni) ni.value = ''; const ppx = document.getElementById('prepaidInput'); if (ppx) ppx.checked = false;
       const tp = document.getElementById('tipPercent'); if (tp) tp.value = '';
       const tpp = document.getElementById('topupPerPerson'); if (tpp) tpp.value = '';
       // reset payer (ไม่ให้ค้างที่ POOL หรือคนเดิม)
@@ -5502,6 +5526,7 @@
     document.getElementById('currency').value = rec.currency;
     document.getElementById('exchangeRate').value = rec.exchangeRate || 1;
     document.getElementById('noteInput').value = rec.note || '';
+    { const ppx = document.getElementById('prepaidInput'); if (ppx) ppx.checked = !!rec.prepaid; }
     // วันที่ — แปลง ISO → YYYY-MM-DD สำหรับ <input type="date">
     const dateInput = document.getElementById('expenseDate');
     if (dateInput) {
@@ -6392,14 +6417,16 @@
     }
 
     // 3) เฉลี่ยต่อวัน (ถ้าทริปกินเวลามากกว่า 1 วัน)
-    const dates = expenses.map(h => new Date(h.date).toDateString());
+    const tripOnly = expenses.filter(h => !h.prepaid);   // เฉลี่ยต่อวัน: ไม่รวมจ่ายล่วงหน้า
+    const tripOnlyTotal = tripOnly.reduce((s, h) => s + (parseFloat(h.baseAmount) || 0), 0);
+    const dates = tripOnly.map(h => new Date(h.date).toDateString());
     const uniqueDays = new Set(dates).size;
     const clockMode = Intl.DateTimeFormat().resolvedOptions().timeZone !== 'Asia/Bangkok';   // โหมดนาฬิกา: การ์ดสถิติไม่ได้แสดงเฉลี่ย/วัน
     if (clockMode && uniqueDays >= 1 && appState.totalSpent > 0) {
       rows.push({
         icon: '📆',
         label: en ? `Avg per day (${uniqueDays} ${uniqueDays > 1 ? 'days' : 'day'})` : `เฉลี่ยต่อวัน (${uniqueDays} วัน)`,
-        value: baht(appState.totalSpent / uniqueDays, 0)
+        value: baht(tripOnlyTotal / uniqueDays, 0)
       });
     }
 
@@ -6426,11 +6453,21 @@
     // Stats grid
     const expRows = appState.history.filter(h => h.type !== 'Repayment' && h.type !== 'Topup' && h.type !== 'Refund');
     const expenseCount = expRows.length;
-    const spendDays = new Set(expRows.map(h => new Date(h.date).toDateString())).size;   // จำนวนวันที่มีการใช้จ่ายจริง
+    // เฉลี่ย/วัน: เฉพาะค่าใช้จ่ายระหว่างทริป — ไม่รวมที่ติ๊ก "จ่ายล่วงหน้า" (ตั๋วเครื่องบิน/ที่พัก) แต่ยอดรวมทั้งทริปยังรวมอยู่
+    const inTrip = expRows.filter(h => !h.prepaid);
+    const prepaidRows = expRows.filter(h => h.prepaid);
+    const inTripTotal = inTrip.reduce((s, h) => s + (parseFloat(h.baseAmount) || 0), 0);
+    const prepaidTotal = prepaidRows.reduce((s, h) => s + (parseFloat(h.baseAmount) || 0), 0);
+    const spendDays = new Set(inTrip.map(h => new Date(h.date).toDateString())).size;   // จำนวนวันที่มีการใช้จ่ายจริง
     const enS = getLang() === 'en';
-    document.getElementById('statCount').innerText = baht(spendDays > 0 ? appState.totalSpent / spendDays : 0);
+    document.getElementById('statCount').innerText = baht(spendDays > 0 ? inTripTotal / spendDays : 0);
     const subS = document.getElementById('statCountSub');
-    if (subS) subS.innerText = expenseCount ? (enS ? `${spendDays} ${spendDays > 1 ? 'days' : 'day'} · ${expenseCount} items` : `${spendDays} วัน · ${expenseCount} รายการ`) : '';
+    if (subS) {
+      subS.style.whiteSpace = 'pre-line';
+      let sub = inTrip.length ? (enS ? `${spendDays} ${spendDays > 1 ? 'days' : 'day'} · ${inTrip.length} items` : `${spendDays} วัน · ${inTrip.length} รายการ`) : '';
+      if (prepaidRows.length) sub += (sub ? '\n' : '') + (enS ? `excl. prepaid ${baht(prepaidTotal, 0)}` : `ไม่รวมจ่ายล่วงหน้า ${baht(prepaidTotal, 0)}`);
+      subS.innerText = sub;
+    }
     updateWorldClock();
     const avgPerPerson = appState.participants.length > 0
       ? appState.totalSpent / appState.participants.length
@@ -7573,6 +7610,8 @@
         ? t('split_all')
         : t('split_n', { n: keys.length });
     }
+
+    if (h.prepaid && !isRepay && !isTopup && !isRefund) involvedText += ' · 🗓️ ' + (getLang() === 'en' ? 'prepaid' : 'จ่ายล่วงหน้า');
 
     const dateLocale = getLang() === 'en' ? 'en-US' : 'th-TH';
     const time = new Date(h.date).toLocaleTimeString(dateLocale, { hour: '2-digit', minute: '2-digit' });
