@@ -991,21 +991,21 @@
     }
 
     /* ===== Floating Calculator Strip — ลอยใต้ช่อง input ===== */
+    /* ลอยเกาะเหนือคีย์บอร์ด (ตำแหน่ง bottom คำนวณจาก visualViewport ใน positionCalcStrip) */
     .calc-strip {
-      position: absolute;
+      position: fixed;
       left: 0;
       right: 0;
-      top: 100%;
-      margin-top: 6px;
-      z-index: 50;
-      padding: 0;
+      bottom: 0;
+      margin: 0 auto;
+      max-width: 28rem;
+      z-index: 60;
+      padding: 0 10px 8px;
       visibility: hidden;
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.15s, transform 0.15s;
-      transform: translateY(-4px);
-      /* บังคับให้ strip ไม่หลุดออกจากหน้าจอด้านขวา */
-      max-width: 100vw;
+      transform: translateY(6px);
     }
     .calc-strip.show {
       visibility: visible;
@@ -3675,6 +3675,8 @@
   }
 
   // Write operations ที่ queue ได้ตอน offline
+  // บันทึก/แก้/ลบรายการ: อัปเดตจอทันที แล้ว sync ขึ้น Firebase เบื้องหลัง (ผู้ใช้ไม่ต้องรอ)
+  const FAST_WRITE = new Set(['addExpense', 'editExpense', 'deleteExpense']);
   const OFFLINE_WRITABLE = new Set(['addExpense', 'editExpense', 'deleteExpense', 'addParticipant', 'deleteParticipant', 'addTrip', 'renameTrip', 'addCategory', 'setTripPool', 'addTopupAll', 'refundPool']);
 
   // Helper: cache key สำหรับ getAppData ต่อ trip
@@ -3720,14 +3722,14 @@
       init();
       const end = Date.now() + 5000;
       while (!connected) {
-        if (Date.now() > end) throw new Error('เชื่อมต่อ Firebase ไม่ได้');
+        if (Date.now() > end) throw new Error('เชื่อมต่อ Firebase ไม่ได้ (network)');
         await new Promise(r => setTimeout(r, 100));
       }
       await Promise.race([authReady, new Promise(r => setTimeout(r, 4000))]);   // รอล็อกอินเสร็จก่อนอ่าน/เขียน
     }
     function withTimeout(p, ms) {
       return new Promise((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('หมดเวลาเชื่อมต่อ Firebase')), ms);
+        const t = setTimeout(() => reject(new Error('หมดเวลาเชื่อมต่อ Firebase (network timeout)')), ms);
         p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
       });
     }
@@ -4316,6 +4318,17 @@
   }
 
   function callBackend(fnName, args, onSuccess) {
+    // Fast path (ออนไลน์): optimistic + คิว แล้ว sync เงียบๆ — ฟอร์มเคลียร์ทันที ไม่ค้างรอเซิร์ฟเวอร์
+    if (isOnline() && FAST_WRITE.has(fnName)) {
+      stampTempId(fnName, args);
+      pushOfflineQueue(fnName, args);
+      try { applyOptimistic(fnName, args); } catch (e) { console.error('optimistic err', e); }
+      persistActiveCache();
+      resetSubmitButton();
+      try { onSuccess(appState); } catch (e) { console.error(e); }
+      syncOfflineQueue({ silent: true });
+      return;
+    }
     // ถ้า offline และเป็น write operation: queue ไว้และ optimistic update
     if (!isOnline() && OFFLINE_WRITABLE.has(fnName)) {
       stampTempId(fnName, args);
@@ -4739,6 +4752,7 @@
 
   // ============ TABS ============
   function switchTab(tabId) {
+    try { hideCalcStrip(); } catch (e) {}
     // ถ้าอยู่ในโหมด edit แล้วเปลี่ยนไปแท็บอื่นที่ไม่ใช่ view-add → ออกจาก edit mode
     const inEdit = document.body.classList.contains('edit-mode');
     if (inEdit && tabId !== 'view-add') {
@@ -5286,6 +5300,7 @@
 
       try {
         appState = res;
+        try { hideCalcStrip(); } catch (e) {}
         const wasEditing = isEditing;
         cancelEdit(true); // silent: ล้าง form แต่ไม่ switchTab (จะทำเองข้างล่าง)
         document.getElementById('amount').value = '';
@@ -8007,8 +8022,25 @@
     if (cntEl) cntEl.innerText = done + '/' + total;
   }
 
-  async function syncOfflineQueue() {
-    if (_syncing) return;
+  // ผู้ใช้กำลังกรอก/เปิด dialog อยู่ไหม — ถ้าใช่ ห้าม re-render หน้าจอ (จะล้างตัวเลือกในฟอร์ม)
+  function userBusyEditing() {
+    const el = document.activeElement;
+    const typing = el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+    const formDirty = ['item', 'amount'].some(id => { const e = document.getElementById(id); return e && e.value; });
+    const modalOpen = !!document.querySelector('.modal-overlay:not(.hidden)');
+    return !!(typing || formDirty || modalOpen);
+  }
+  function refreshWhenIdle(n) {
+    n = n || 0;
+    if (userBusyEditing() && n < 20) { setTimeout(() => refreshWhenIdle(n + 1), 1500); return; }
+    if (getOfflineQueue().length > 0 || _syncing) return;   // ยังมีของค้าง → รอรอบ sync ถัดไปแล้วค่อย refresh
+    loadInitialData(appState && appState.activeTripId, { skipSkeletons: true, silent: true });
+  }
+
+  let _syncAgain = false, _silentRetries = 0;
+  async function syncOfflineQueue(opts) {
+    const silent = !!(opts && opts.silent);
+    if (_syncing) { _syncAgain = true; return; }   // มีรายการใหม่เข้าคิวระหว่าง sync → วนรอบใหม่ต่อให้
     if (!isOnline()) return;
     if (!FIREBASE_CONFIG.databaseURL) return;
     let queue = getOfflineQueue();
@@ -8018,8 +8050,9 @@
     const total = queue.length;        // ยอดรวมตอนเริ่ม (ใช้คิด %)
     let processed = 0;                  // จำนวนที่ "จบ" แล้ว (สำเร็จ หรือ dead-letter)
     try {
-      updateSyncProgress(0, total);
-      showSyncBanner();
+      const _sp = (a, b) => { if (!silent) updateSyncProgress(a, b); };
+      _sp(0, total);
+      if (!silent) showSyncBanner();
       let synced = 0;
 
       // ประมวลผลทีละตัวตามลำดับ — หยุดทันทีเมื่อตัวหนึ่ง fail (รักษาลำดับ replay)
@@ -8049,15 +8082,15 @@
           synced++;
           popOfflineQueueItem(item.id);
           processed++;
-          updateSyncProgress(processed, total);
+          _sp(processed, total);
           continue;
         }
 
         // fail — เพิ่ม retry; ถ้าเกินเพดาน ย้ายไป dead-letter เพื่อไม่ให้ค้างถาวร
         // ถ้าเป็น network error (offline กลางคัน) → หยุด ปล่อยไว้ sync รอบหน้า ไม่นับ retry
         const isNetwork = /HTTP|Failed to fetch|network|NetworkError/i.test(errMsg);
-        if (isNetwork && !isOnline()) {
-          break; // เน็ตหลุดระหว่างทาง — เก็บ queue ไว้ตามเดิม
+        if (isNetwork) {
+          break; // เน็ต/การเชื่อมต่อมีปัญหา — เก็บ queue ไว้ ไม่นับ retry ไม่ dead-letter
         }
         let dead = false;
         updateQueueHead(it => {
@@ -8068,7 +8101,7 @@
           pushDeadLetter(item, errMsg);
           popOfflineQueueItem(item.id);
           processed++;
-          updateSyncProgress(processed, total);
+          _sp(processed, total);
           showToast('ข้ามรายการที่ sync ไม่สำเร็จ: ' + item.fnName, 'error');
           continue; // ข้ามตัวนี้ ทำตัวถัดไป
         }
@@ -8078,17 +8111,20 @@
 
       const remaining = getOfflineQueue().length;
       if (synced > 0) {
-        showToast(t('synced') + ' (' + synced + ')', 'success');
-        // refresh ข้อมูลจริงจาก backend (ล้าง optimistic state)
-        loadInitialData(appState && appState.activeTripId, { skipSkeletons: true, silent: true });
+        _silentRetries = 0;
+        if (!silent) showToast(t('synced') + ' (' + synced + ')', 'success');
+        // refresh ข้อมูลจริงจาก backend (ล้าง optimistic state) — รอจนผู้ใช้กรอกฟอร์มเสร็จก่อน
+        setTimeout(() => refreshWhenIdle(0), 0);
       }
       if (remaining > 0) {
         showToast('ยังค้าง ' + remaining + ' รายการ — จะลองใหม่', 'info');
+        if (isOnline() && _silentRetries < 6) { _silentRetries++; setTimeout(() => syncOfflineQueue({ silent: true }), 8000); }
       }
       updateOfflineUI();
     } finally {
       hideSyncBanner();
       _syncing = false;
+      if (_syncAgain) { _syncAgain = false; setTimeout(() => syncOfflineQueue({ silent: true }), 50); }
     }
   }
 
@@ -8197,7 +8233,7 @@
   // - scroll → ปิด numpad + ปิด calc (blur input)
   let _calcActiveInput = null;
   let _calcKbHeight = 0;
-  let _suppressBlur = false;
+  let _suppressBlurUntil = 0;   // กด +−×÷= แล้วช่วงสั้นๆ ไม่ปิด strip (หมดอายุเอง — ไม่ค้างจนกลืน blur จริง)
 
   function isCalcExpr(s) {
     return /[+\-*/]/.test(s);
@@ -8236,27 +8272,17 @@
     _calcActiveInput = null;
   }
 
-  // ย้าย strip ไปอยู่ใต้ active input — รองรับทั้ง #amount และ .custom-amount-input
+  // วาง strip ให้ลอยเหนือคีย์บอร์ดเสมอ (ไม่ผูกกับตำแหน่งช่อง input)
   function positionCalcStrip() {
     const strip = document.getElementById('calcStrip');
-    if (!strip || !_calcActiveInput) return;
-    const input = _calcActiveInput;
-    // หา host ที่กว้างเต็ม row:
-    // - custom-amount-input → row ที่มี [data-calc-host]
-    // - #amount → #amountSection
-    let host = input.closest('[data-calc-host]') || document.getElementById('amountSection');
-    if (!host) {
-      // fallback: ใช้ parent ที่ relative
-      host = input.parentElement;
-      host.style.position = 'relative';
-    }
-    // ทำให้ host เป็น relative (เผื่อยังไม่ใช่)
-    const pos = window.getComputedStyle(host).position;
-    if (pos === 'static') host.style.position = 'relative';
-    // ย้าย strip เข้าไปอยู่ใน host (ถ้ายังไม่อยู่)
-    if (strip.parentElement !== host) {
-      host.appendChild(strip);
-    }
+    if (!strip) return;
+    if (strip.parentElement !== document.body) document.body.appendChild(strip);   // กัน parent ที่มี transform ทำให้ fixed เพี้ยน
+    const vv = window.visualViewport;
+    const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+    const nav = document.querySelector('nav.glass-nav');
+    const navH = nav ? nav.offsetHeight : 0;
+    // มีคีย์บอร์ดบนจอ → เกาะเหนือคีย์บอร์ด / ไม่มี (เช่น เดสก์ท็อป) → เกาะเหนือแถบเมนูล่าง
+    strip.style.bottom = (kb > 80 ? kb : navH) + 'px';
   }
 
   function updateCalcPreview() {
@@ -8331,7 +8357,7 @@
   }
 
   function onAmountBlur(input) {
-    if (_suppressBlur) { _suppressBlur = false; return; }
+    if (Date.now() < _suppressBlurUntil) return;
     // ถ้ามี expression ค้างอยู่ → calculate ก่อน blur
     if (input && isCalcExpr(input.value)) {
       const r = safeEvalExpr(input.value);
@@ -8360,7 +8386,7 @@
   // กดปุ่ม operator: append ต่อจาก value เดิม
   function calcAppend(op) {
     if (!_calcActiveInput) return;
-    _suppressBlur = true;
+    _suppressBlurUntil = Date.now() + 600;
     const input = _calcActiveInput;
     let v = input.value || '';
     // ถ้าตัวสุดท้ายเป็น operator แล้ว → แทนที่
@@ -8381,7 +8407,7 @@
 
   function calcEvaluate() {
     if (!_calcActiveInput) return;
-    _suppressBlur = true;
+    _suppressBlurUntil = Date.now() + 600;
     const input = _calcActiveInput;
     const r = safeEvalExpr(input.value);
     if (r !== null) {
@@ -8396,6 +8422,20 @@
   function initCalcStrip() {
     const strip = document.getElementById('calcStrip');
     if (!strip) return;
+
+    // ตามคีย์บอร์ด + ปิด strip เมื่อโฟกัสไม่ได้อยู่ที่ช่องจำนวนเงินแล้ว (กันค้าง)
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', positionCalcStrip);
+      window.visualViewport.addEventListener('scroll', positionCalcStrip);
+    }
+    window.addEventListener('resize', positionCalcStrip);
+    const isCalcField = (a) => a && (a.id === 'amount' || (a.classList && a.classList.contains('custom-amount-input')));
+    const checkHide = () => {
+      if (Date.now() < _suppressBlurUntil) { setTimeout(checkHide, _suppressBlurUntil - Date.now() + 50); return; }   // เพิ่งกดปุ่มคิดเลข → เช็คใหม่ทีหลัง
+      if (!isCalcField(document.activeElement)) hideCalcStrip();
+    };
+    document.addEventListener('focusout', () => setTimeout(checkHide, 450));
+    document.addEventListener('visibilitychange', () => { if (document.hidden) hideCalcStrip(); });
 
     // ผูก event บนทุกปุ่ม — ป้องกัน blur ของ input
     // หลัก: ใช้ touchend/pointerup แทน click เพื่อหลีกเลี่ยงปัญหาบน iOS Safari
