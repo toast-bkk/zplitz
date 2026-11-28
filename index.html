@@ -3123,6 +3123,138 @@
     return /iphone|ipad|ipod/i.test(navigator.userAgent);
   }
 
+  // ============ บังคับติดตั้งแอป (เฉพาะมือถือ): เปิดจาก Safari/เบราว์เซอร์/เบราว์เซอร์ในแอปอื่น → ขึ้นหน้าวิธีติดตั้ง ============
+  // หมายเหตุ: เป็นการกันฝั่งหน้าเว็บ (ผู้ใช้ทั่วไป) ไม่ใช่ระบบความปลอดภัย — เดสก์ท็อปไม่ถูกบังคับ
+  window._deferredInstall = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    window._deferredInstall = e;
+    if (document.getElementById('installGate')) renderInstallGate();
+  });
+  window.addEventListener('appinstalled', () => {
+    window._deferredInstall = null;
+    window._justInstalled = true;
+    if (document.getElementById('installGate')) renderInstallGate();
+  });
+
+  function isMobileDevice() {
+    const ua = navigator.userAgent || '';
+    return /iphone|ipad|ipod|android/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);   // iPadOS ที่ขอเว็บแบบเดสก์ท็อป
+  }
+  function isIOSDevice() {
+    return isIOS() || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+  // เบราว์เซอร์ที่ฝังอยู่ในแอปอื่น (ติดตั้งแอปจากตรงนี้ไม่ได้)
+  function inAppBrowserName() {
+    const ua = navigator.userAgent || '';
+    if (/\bLine\//i.test(ua)) return 'LINE';
+    if (/FBAN|FBAV|FB_IAB/i.test(ua)) return 'Facebook';
+    if (/Instagram/i.test(ua)) return 'Instagram';
+    if (/MicroMessenger/i.test(ua)) return 'WeChat';
+    if (/KAKAOTALK/i.test(ua)) return 'KakaoTalk';
+    if (/Twitter|TikTok|musical_ly|Snapchat/i.test(ua)) return 'in-app';
+    if (/; wv\)/i.test(ua)) return 'in-app';   // Android WebView
+    return null;
+  }
+  function needsInstallGate() {
+    try {
+      const q = new URLSearchParams(location.search).get('nogate');
+      if (q === '1') localStorage.setItem('zplitz_nogate', '1');     // ทางเข้าสำหรับเจ้าของแอป/ทดสอบ (จำในเบราว์เซอร์นั้น)
+      if (q === '0') localStorage.removeItem('zplitz_nogate');
+      if (localStorage.getItem('zplitz_nogate') === '1') return false;
+    } catch (e) {}
+    return isMobileDevice() && !isStandalone();
+  }
+
+  function showInstallGate() {
+    const sp = document.getElementById('splashScreen');
+    if (sp) sp.remove();
+    renderInstallGate();
+  }
+
+  function renderInstallGate() {
+    let el = document.getElementById('installGate');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'installGate';
+      el.style.cssText = 'position:fixed;inset:0;z-index:10000;overflow-y:auto;background:var(--bg,#fdfaf3);color:var(--text);' +
+        'padding:calc(28px + env(safe-area-inset-top)) 22px calc(28px + env(safe-area-inset-bottom));';
+      document.body.appendChild(el);
+    }
+    const en = getLang() === 'en';
+    const iab = inAppBrowserName();
+    const ios = isIOSDevice();
+    const url = location.origin + location.pathname;
+    const step = (n, html) => `<div style="display:flex;gap:12px;align-items:flex-start;margin:14px 0;">
+        <div style="flex:none;width:28px;height:28px;border-radius:50%;background:var(--primary);color:var(--primary-text);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px;">${n}</div>
+        <div style="flex:1;font-size:15px;line-height:1.5;padding-top:2px;">${html}</div></div>`;
+    const shareIcon = `<svg style="display:inline-block;vertical-align:-3px" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>`;
+    const btn = (id, label, primary) => `<button id="${id}" style="width:100%;padding:13px;border-radius:14px;font-weight:700;font-size:15px;margin-top:10px;border:1px solid var(--border);${primary ? 'background:var(--primary);color:var(--primary-text);border-color:transparent;' : 'background:var(--surface);color:var(--text);'}">${label}</button>`;
+
+    let body = '';
+    if (window._justInstalled) {
+      body = `<div style="margin-top:22px;padding:16px;border-radius:16px;background:var(--success-soft);font-size:15px;line-height:1.5;">
+        ✅ ${en ? 'Installed! Close this page and open <b>Zplitz</b> from the icon on your home screen.' : 'ติดตั้งแล้ว! ปิดหน้านี้ แล้วเปิด <b>Zplitz</b> จากไอคอนบนหน้าจอโฮม'}</div>`;
+    } else if (iab) {
+      const where = iab === 'LINE' ? 'LINE' : (en ? 'this app' : 'แอปนี้');
+      body = `<div style="margin-top:20px;padding:14px 16px;border-radius:16px;background:var(--danger-soft);font-size:14px;line-height:1.5;">
+          ⚠️ ${en ? `You're in the in-app browser of ${where}, which can't install apps.` : `ตอนนี้เปิดอยู่ในเบราว์เซอร์ของ ${where} ซึ่งติดตั้งแอปไม่ได้`}</div>
+        <div style="font-weight:700;margin-top:20px;">${en ? 'Step 1 — open this page in your browser' : 'ขั้นที่ 1 — เปิดหน้านี้ในเบราว์เซอร์'}</div>
+        ${step('•', ios
+          ? (en ? 'Tap the <b>share / ⋯</b> button, then choose <b>Open in Safari</b>.' : 'แตะปุ่ม <b>แชร์ / ⋯</b> แล้วเลือก <b>เปิดใน Safari</b>')
+          : (en ? 'Tap <b>⋮</b> (top right), then choose <b>Open in another browser</b> / <b>Open in Chrome</b>.' : 'แตะ <b>⋮</b> (มุมขวาบน) แล้วเลือก <b>เปิดในเบราว์เซอร์อื่น</b> / <b>เปิดใน Chrome</b>'))}
+        ${iab === 'LINE' ? btn('gateOpenExt', en ? 'Try opening in browser' : 'ลองเปิดในเบราว์เซอร์', true) : ''}
+        ${btn('gateCopy', en ? 'Copy link' : 'คัดลอกลิงก์', iab !== 'LINE')}
+        <div id="gateMsg" style="font-size:13px;color:var(--text-2);margin-top:8px;min-height:18px;"></div>
+        <div style="font-weight:700;margin-top:18px;">${en ? 'Step 2 — add it to your home screen' : 'ขั้นที่ 2 — เพิ่มไปที่หน้าจอโฮม'}</div>
+        <div style="font-size:14px;color:var(--text-2);margin-top:4px;">${ios
+          ? (en ? 'In Safari tap Share ' + shareIcon + ' → <b>Add to Home Screen</b>.' : 'ใน Safari แตะแชร์ ' + shareIcon + ' → <b>เพิ่มไปยังหน้าจอโฮม</b>')
+          : (en ? 'In Chrome tap ⋮ → <b>Install app</b> / <b>Add to Home screen</b>.' : 'ใน Chrome แตะ ⋮ → <b>ติดตั้งแอป</b> / <b>เพิ่มไปยังหน้าจอหลัก</b>')}</div>`;
+    } else if (ios) {
+      body = `<div style="font-weight:700;margin-top:22px;">${en ? 'Add to Home Screen (Safari)' : 'วิธีเพิ่มไปหน้าจอโฮม (Safari)'}</div>
+        ${step(1, en ? `Tap the <b>Share</b> button ${shareIcon} (or <b>⋯</b>) at the bottom of Safari.` : `แตะปุ่ม <b>แชร์</b> ${shareIcon} (หรือ <b>⋯</b>) ที่แถบด้านล่างของ Safari`)}
+        ${step(2, en ? 'Scroll down and tap <b>Add to Home Screen</b>.' : 'เลื่อนลงแล้วแตะ <b>เพิ่มไปยังหน้าจอโฮม</b>')}
+        ${step(3, en ? 'Tap <b>Add</b>, then open <b>Zplitz</b> from your home screen.' : 'แตะ <b>เพิ่ม</b> แล้วเปิด <b>Zplitz</b> จากไอคอนบนหน้าจอโฮม')}
+        <div style="font-size:12px;color:var(--text-3);margin-top:6px;">${en ? 'Not using Safari? Open this link in Safari first.' : 'ถ้าไม่ได้ใช้ Safari ให้เปิดลิงก์นี้ใน Safari ก่อน'}</div>`;
+    } else {
+      body = `<div style="font-weight:700;margin-top:22px;">${en ? 'Install the app' : 'วิธีติดตั้งแอป'}</div>
+        ${window._deferredInstall ? btn('gateInstall', en ? 'Install app' : 'ติดตั้งแอป', true) + '<div style="height:6px"></div>' : ''}
+        ${step(1, en ? 'Tap the browser menu <b>⋮</b> (top right).' : 'แตะเมนูเบราว์เซอร์ <b>⋮</b> (มุมขวาบน)')}
+        ${step(2, en ? 'Choose <b>Install app</b> or <b>Add to Home screen</b>.' : 'เลือก <b>ติดตั้งแอป</b> หรือ <b>เพิ่มไปยังหน้าจอหลัก</b>')}
+        ${step(3, en ? 'Open <b>Zplitz</b> from the icon on your home screen.' : 'เปิด <b>Zplitz</b> จากไอคอนบนหน้าจอโฮม')}`;
+    }
+
+    el.innerHTML = `<div style="max-width:420px;margin:0 auto;">
+      <div style="text-align:center;">
+        <img src="icon-192.png" alt="" width="72" height="72" style="border-radius:18px;margin:8px auto 12px;display:block;" onerror="this.style.display='none'">
+        <div style="font-size:22px;font-weight:800;">${en ? 'Install Zplitz to get started' : 'ติดตั้ง Zplitz ก่อนเริ่มใช้งาน'}</div>
+        <div style="font-size:14px;color:var(--text-2);margin-top:6px;line-height:1.5;">${en ? 'Zplitz works only as an installed app — it opens full screen and works offline.' : 'ใช้งานได้เฉพาะแอปที่เพิ่มไว้บนหน้าจอโฮม เปิดเต็มจอและใช้ออฟไลน์ได้'}</div>
+      </div>
+      ${body}
+      <div style="font-size:12px;color:var(--text-3);margin-top:26px;text-align:center;line-height:1.5;">${en ? 'Already installed? Close this page and open Zplitz from your home screen icon.' : 'ติดตั้งไว้แล้ว? ปิดหน้านี้ แล้วเปิดจากไอคอน Zplitz บนหน้าจอโฮมแทน'}</div>
+    </div>`;
+
+    const msg = (t) => { const m = document.getElementById('gateMsg'); if (m) m.textContent = t; };
+    const ext = document.getElementById('gateOpenExt');
+    if (ext) ext.onclick = () => { location.href = url + '?openExternalBrowser=1'; };   // LINE: เปิดลิงก์ด้วยเบราว์เซอร์หลัก
+    const cp = document.getElementById('gateCopy');
+    if (cp) cp.onclick = async () => {
+      try { await navigator.clipboard.writeText(url); msg(en ? 'Link copied — paste it in your browser' : 'คัดลอกลิงก์แล้ว นำไปวางในเบราว์เซอร์ได้เลย'); }
+      catch (e) {
+        const ta = document.createElement('textarea'); ta.value = url; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); msg(en ? 'Link copied — paste it in your browser' : 'คัดลอกลิงก์แล้ว นำไปวางในเบราว์เซอร์ได้เลย'); } catch (e2) { msg(url); }
+        ta.remove();
+      }
+    };
+    const ins = document.getElementById('gateInstall');
+    if (ins) ins.onclick = async () => {
+      const ev = window._deferredInstall; if (!ev) return;
+      ev.prompt();
+      try { await ev.userChoice; } catch (e) {}
+      window._deferredInstall = null;
+    };
+  }
+
   // สร้างเนื้อหาสไลด์ "เพิ่มไปหน้าจอโฮม" ตาม iOS/Android
   function obA2hsContent() {
     const en = getLang() === 'en';
@@ -4537,15 +4669,14 @@
         localStorage.removeItem('trip_last_id');
       }
       updateAllUI();
+      // ไม่มีทริปเลย → เปิดหน้าสร้างทริปทันที "ก่อน" splash จาง จะได้ไม่เห็นหน้าสรุปแว้บ
+      // (ครั้งแรกสุดใช้สไลด์สร้างทริปในออนบอร์ดดิ้งอยู่แล้ว)
+      if (res.trips && res.trips.length === 0 && localStorage.getItem('trip_onboarded') === '1') {
+        const ob = document.getElementById('onboarding');
+        if (!ob || !ob.classList.contains('show')) openTripPicker();
+      }
       hideSplashScreen();
       if (showLoading && typeof hideAppLoading === 'function') hideAppLoading();
-      // ไม่มีทริปเลย → ขึ้นหน้าสร้างทริป (รอ splash/ออนบอร์ดดิ้งครั้งแรกจบก่อน เพราะมีสไลด์สร้างทริปอยู่แล้ว)
-      if (res.trips && res.trips.length === 0) {
-        setTimeout(() => {
-          const ob = document.getElementById('onboarding');
-          if (!ob || !ob.classList.contains('show')) openTripPicker();
-        }, document.getElementById('splashScreen') ? 1000 : 0);
-      }
     });
   }
 
@@ -4557,11 +4688,11 @@
     const elapsed = Date.now() - (window._splashStartTime || Date.now());
     const wait = Math.max(0, minDuration - elapsed);
     setTimeout(() => {
+      // แสดงวิธีใช้งานครั้งแรก (เฉพาะถ้ายังไม่เคยดู) — เปิดก่อน splash จาง จะได้ไม่เห็นหน้าแอปข้างหลังแว้บ
+      startOnboarding(false);
       splash.classList.add('fade-out');
       // ลบ DOM หลัง transition จบ เพื่อไม่ให้กิน memory
       setTimeout(() => splash.remove(), 600);
-      // แสดงวิธีใช้งานครั้งแรก (เฉพาะถ้ายังไม่เคยดู)
-      startOnboarding(false);
       // ตรวจการเปลี่ยนประเทศ → หน้าต้อนรับ (หน่วงให้ onboarding เคลียร์ก่อน)
       setTimeout(() => {
         const ob = document.getElementById('onboarding');
@@ -8826,6 +8957,8 @@
   // ============ INIT ============
   window.onload = () => {
     applyLang();
+    // มือถือที่ไม่ได้เปิดจากไอคอนบนหน้าจอโฮม → ขึ้นหน้าวิธีติดตั้ง และไม่โหลดแอป
+    if (needsInstallGate()) { showInstallGate(); return; }
     updateDeadLetterUI(); // แสดงปุ่ม "รายการ sync ไม่สำเร็จ" ถ้ามีค้างจากครั้งก่อน
 
     // Network listeners
