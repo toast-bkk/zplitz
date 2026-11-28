@@ -3208,13 +3208,15 @@
         <div id="gateMsg" style="font-size:13px;color:var(--text-2);margin-top:8px;min-height:18px;"></div>
         <div style="font-weight:700;margin-top:18px;">${en ? 'Step 2 — add it to your home screen' : 'ขั้นที่ 2 — เพิ่มไปที่หน้าจอโฮม'}</div>
         <div style="font-size:14px;color:var(--text-2);margin-top:4px;">${ios
-          ? (en ? 'In Safari tap Share ' + shareIcon + ' → <b>Add to Home Screen</b>.' : 'ใน Safari แตะแชร์ ' + shareIcon + ' → <b>เพิ่มไปยังหน้าจอโฮม</b>')
+          ? (en ? 'In Safari tap ≡ → <b>Share</b> → <b>Add to Home Screen</b>, keep “Open as Web App” on, then tap Add.' : 'ใน Safari แตะ ≡ → <b>แชร์</b> → <b>เพิ่มไปยังหน้าจอโฮม</b> เปิดสวิตช์ “เปิดเป็นแอปหน้าเว็บ” ไว้ แล้วแตะ เพิ่ม')
           : (en ? 'In Chrome tap ⋮ → <b>Install app</b> / <b>Add to Home screen</b>.' : 'ใน Chrome แตะ ⋮ → <b>ติดตั้งแอป</b> / <b>เพิ่มไปยังหน้าจอหลัก</b>')}</div>`;
     } else if (ios) {
       body = `<div style="font-weight:700;margin-top:22px;">${en ? 'Add to Home Screen (Safari)' : 'วิธีเพิ่มไปหน้าจอโฮม (Safari)'}</div>
-        ${step(1, en ? `Tap the <b>Share</b> button ${shareIcon} (or <b>⋯</b>) at the bottom of Safari.` : `แตะปุ่ม <b>แชร์</b> ${shareIcon} (หรือ <b>⋯</b>) ที่แถบด้านล่างของ Safari`)}
-        ${step(2, en ? 'Scroll down and tap <b>Add to Home Screen</b>.' : 'เลื่อนลงแล้วแตะ <b>เพิ่มไปยังหน้าจอโฮม</b>')}
-        ${step(3, en ? 'Tap <b>Add</b>, then open <b>Zplitz</b> from your home screen.' : 'แตะ <b>เพิ่ม</b> แล้วเปิด <b>Zplitz</b> จากไอคอนบนหน้าจอโฮม')}
+        ${step(1, en ? `Tap the menu button <b>≡</b> next to the address bar at the bottom (older iOS: the Share button ${shareIcon}), then choose <b>Share</b>.` : `แตะปุ่มเมนู <b>≡</b> ข้างช่องที่อยู่เว็บที่แถบด้านล่าง (iOS รุ่นเก่า: ปุ่มแชร์ ${shareIcon}) แล้วเลือก <b>แชร์</b>`)}
+        ${step(2, en ? 'In the share sheet, scroll down and tap <b>Add to Home Screen</b>.' : 'ในหน้าต่างแชร์ เลื่อนลงแล้วแตะ <b>เพิ่มไปยังหน้าจอโฮม</b>')}
+        ${step(3, en ? 'Keep <b>Open as Web App</b> switched <b>on</b>, then tap <b>Add</b>.' : 'เปิดสวิตช์ <b>เปิดเป็นแอปหน้าเว็บ</b> ไว้ แล้วแตะ <b>เพิ่ม</b>')}
+        ${step(4, en ? 'Open <b>Zplitz</b> from the icon on your home screen.' : 'เปิด <b>Zplitz</b> จากไอคอนบนหน้าจอโฮม')}
+        <div style="font-size:13px;color:var(--text-2);margin-top:6px;line-height:1.5;">${en ? 'If “Open as Web App” is off, the icon opens in Safari and this page will appear again.' : 'ถ้าปิดสวิตช์ “เปิดเป็นแอปหน้าเว็บ” ไอคอนจะเปิดใน Safari และจะเห็นหน้านี้อีก'}</div>
         <div style="font-size:12px;color:var(--text-3);margin-top:6px;">${en ? 'Not using Safari? Open this link in Safari first.' : 'ถ้าไม่ได้ใช้ Safari ให้เปิดลิงก์นี้ใน Safari ก่อน'}</div>`;
     } else {
       body = `<div style="font-weight:700;margin-top:22px;">${en ? 'Install the app' : 'วิธีติดตั้งแอป'}</div>
@@ -3228,7 +3230,7 @@
       <div style="text-align:center;">
         <img src="icon-192.png" alt="" width="72" height="72" style="border-radius:18px;margin:8px auto 12px;display:block;" onerror="this.style.display='none'">
         <div style="font-size:22px;font-weight:800;">${en ? 'Install Zplitz to get started' : 'ติดตั้ง Zplitz ก่อนเริ่มใช้งาน'}</div>
-        <div style="font-size:14px;color:var(--text-2);margin-top:6px;line-height:1.5;">${en ? 'Zplitz works only as an installed app — it opens full screen and works offline.' : 'ใช้งานได้เฉพาะแอปที่เพิ่มไว้บนหน้าจอโฮม เปิดเต็มจอและใช้ออฟไลน์ได้'}</div>
+        <div style="font-size:14px;color:var(--text-2);margin-top:6px;line-height:1.5;">${en ? 'Zplitz works only as an installed app — it opens full screen and works offline.' : 'ใช้งานได้เฉพาะแอปที่เพิ่มไว้บนหน้าจอโฮม เปิดเต็มจอและ<span style="white-space:nowrap">ใช้ออฟไลน์ได้</span>'}</div>
       </div>
       ${body}
       <div style="font-size:12px;color:var(--text-3);margin-top:26px;text-align:center;line-height:1.5;">${en ? 'Already installed? Close this page and open Zplitz from your home screen icon.' : 'ติดตั้งไว้แล้ว? ปิดหน้านี้ แล้วเปิดจากไอคอน Zplitz บนหน้าจอโฮมแทน'}</div>
